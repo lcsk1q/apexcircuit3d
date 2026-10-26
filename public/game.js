@@ -1,6 +1,15 @@
 // public/game.js
 import * as THREE from 'three';
-import { TRACKS, CAR_TYPES, getPointAtProgress } from '/shared/track.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { TRACKS, CAR_TYPES as RAW_CAR_TYPES, getPointAtProgress } from '/shared/track.js';
+
+// Mapeamento dos 4 carros .GLB com os preços solicitados
+const CAR_TYPES = [
+  { id: 'CAR1', name: 'Carro 1 (Inicial)', modelFile: '/models/car1.glb', price: 0, tier: 1, topSpeed: 45, accel: 35, handling: 2.5, desc: 'Carro leve inicial para começar as corridas.', color: '#3b82f6', accent: '#60a5fa' },
+  { id: 'CAR2', name: 'Carro 2 (Tuner GT)', modelFile: '/models/car2.glb', price: 200, tier: 2, topSpeed: 50, accel: 40, handling: 2.7, desc: 'Modelo esportivo com maior aceleração.', color: '#ef4444', accent: '#f87171' },
+  { id: 'CAR3', name: 'Carro 3 (Muscle V8)', modelFile: '/models/car3.glb', price: 700, tier: 3, topSpeed: 55, accel: 45, handling: 2.9, desc: 'Super potente em retas.', color: '#f59e0b', accent: '#fbbf24' },
+  { id: 'CAR4', name: 'Carro 4 (Cyber Hyper)', modelFile: '/models/car4.glb', price: 1500, tier: 4, topSpeed: 60, accel: 50, handling: 3.2, desc: 'O carro definitivo do circuito.', color: '#10b981', accent: '#34d399' }
+];
 
 const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 if (isTouchDevice) document.body.classList.add('is-touch');
@@ -13,11 +22,14 @@ let currentRoom = null;
 let currentTrackConfig = TRACKS.SPEEDWAY;
 let lowGraphics = localStorage.getItem('apex_low_gfx') === '1';
 
-// SISTEMA DE CARTEIRA E GARAGEM (SALVO NO NAVEGADOR)
+// CARTEIRA E GARAGEM (SALVO NO BROWSER)
 let walletCoins = Number(localStorage.getItem('apex_wallet_coins') || 0);
-let unlockedCars = JSON.parse(localStorage.getItem('apex_unlocked_cars') || '["STARTER"]');
-let selectedCarId = localStorage.getItem('apex_selected_car') || 'STARTER';
-if (!unlockedCars.includes('STARTER')) unlockedCars.push('STARTER');
+let unlockedCars = JSON.parse(localStorage.getItem('apex_unlocked_cars') || '["CAR1"]');
+let selectedCarId = localStorage.getItem('apex_selected_car') || 'CAR1';
+
+// Mapeamento de retrocompatibilidade para contas antigas
+if (selectedCarId === 'STARTER') selectedCarId = 'CAR1';
+if (!unlockedCars.includes('CAR1')) unlockedCars.push('CAR1');
 
 let inGarageView = false;
 let garageCarIndex = Math.max(0, CAR_TYPES.findIndex(c => c.id === selectedCarId));
@@ -30,7 +42,7 @@ const itemBoxMeshes = new Map();
 const coinMeshes = new Map();
 const oilTrapMeshes = new Map();
 
-// Elementos UI
+// UI Elements
 const elMenu = document.getElementById('menu-screen');
 const elGarage = document.getElementById('garage-screen');
 const elLobby = document.getElementById('lobby-screen');
@@ -72,7 +84,7 @@ function showToast(msg, color = '#ef4444') {
 }
 
 // ==========================================
-// MOTOR 3D THREE.JS
+// THREE.JS ENGINE
 // ==========================================
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowGraphics, powerPreference: 'high-performance' });
@@ -112,174 +124,14 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ==========================================
-// MODELAGEM 3D DETALHADA DOS 5 CARROS
-// ==========================================
-export function createDetailedCarMesh(carTypeId = 'STARTER', customColor = null) {
-  const spec = CAR_TYPES.find(c => c.id === carTypeId) || CAR_TYPES[0];
-  const primaryColor = new THREE.Color(customColor || spec.color);
-  const accentColor = new THREE.Color(spec.accent);
+// Instância do GLTFLoader para carregar /models/car1.glb a car4.glb
+const gltfLoader = new GLTFLoader();
 
+export function createDetailedCarMesh(carTypeId = 'CAR1', customColor = null) {
+  const spec = CAR_TYPES.find(c => c.id === carTypeId || c.modelFile?.includes(carTypeId.toLowerCase())) || CAR_TYPES[0];
   const root = new THREE.Group();
 
-  const paintMat = new THREE.MeshStandardMaterial({ color: primaryColor, roughness: 0.25, metalness: 0.55 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.3, metalness: 0.4 });
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.9 });
-  const tireMat = new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.9 });
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.8, roughness: 0.2 });
-  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
-  const taillightMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
-
-  // 4 Rodas Detalhadas
-  const wheelPositions = [
-    [-1.05, 0.42, 1.25],
-    [1.05, 0.42, 1.25],
-    [-1.05, 0.42, -1.25],
-    [1.05, 0.42, -1.25]
-  ];
-  for (const [wx, wy, wz] of wheelPositions) {
-    const wheelGroup = new THREE.Group();
-    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.36, 16), tireMat);
-    tire.rotation.z = Math.PI / 2;
-    wheelGroup.add(tire);
-
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.38, 12), rimMat);
-    rim.rotation.z = Math.PI / 2;
-    wheelGroup.add(rim);
-
-    wheelGroup.position.set(wx, wy, wz);
-    root.add(wheelGroup);
-  }
-
-  // Sombra embaixo do carro
-  const underbody = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.18, 3.8), darkMat);
-  underbody.position.y = 0.32;
-  root.add(underbody);
-
-  if (spec.id === 'STARTER') {
-    // Tier 1: Street Hatch Compacto
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.58, 3.7), paintMat);
-    body.position.y = 0.62;
-    root.add(body);
-
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.52, 1.9), glassMat);
-    cabin.position.set(0, 1.1, -0.2);
-    root.add(cabin);
-
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.08, 1.6), paintMat);
-    roof.position.set(0, 1.38, -0.2);
-    root.add(roof);
-  } else if (spec.id === 'TUNER') {
-    // Tier 2: Esportivo GT com Aerofólio e Faixa
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.52, 4.1), paintMat);
-    body.position.y = 0.58;
-    root.add(body);
-
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.53, 4.12), accentMat);
-    stripe.position.y = 0.58;
-    root.add(stripe);
-
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.46, 1.85), glassMat);
-    cabin.position.set(0, 1.02, -0.15);
-    root.add(cabin);
-
-    // Aerofólio GT
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.08, 0.35), darkMat);
-    wing.position.set(0, 1.18, -1.85);
-    root.add(wing);
-    const strutL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.18), darkMat);
-    strutL.position.set(-0.6, 0.98, -1.85);
-    const strutR = strutL.clone();
-    strutR.position.x = 0.6;
-    root.add(strutL, strutR);
-  } else if (spec.id === 'MUSCLE') {
-    // Tier 3: V8 Muscle Car com Motor Blower no Capô
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.6, 4.25), paintMat);
-    body.position.y = 0.64;
-    root.add(body);
-
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.46, 1.75), glassMat);
-    cabin.position.set(0, 1.1, -0.35);
-    root.add(cabin);
-
-    // Supercharger no capô
-    const blowerBase = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.25, 0.75), rimMat);
-    blowerBase.position.set(0, 1.02, 1.05);
-    const blowerIntake = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.45), darkMat);
-    blowerIntake.position.set(0, 1.18, 1.12);
-    root.add(blowerBase, blowerIntake);
-
-    // Para-choque cromado
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.15), rimMat);
-    bumper.position.set(0, 0.45, 2.15);
-    root.add(bumper);
-  } else if (spec.id === 'CYBERCAR') {
-    // Tier 4: Supercarro Cyberpunk com Luzes Neon
-    const neonMat = new THREE.MeshBasicMaterial({ color: accentColor });
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.18, 0.44, 4.35), paintMat);
-    body.position.y = 0.54;
-    root.add(body);
-
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.2), glassMat);
-    canopy.position.set(0, 0.9, 0.05);
-    root.add(canopy);
-
-    // Faixas laterais de Neon
-    const neonL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 4.38), neonMat);
-    neonL.position.set(-1.1, 0.55, 0);
-    const neonR = neonL.clone();
-    neonR.position.x = 1.1;
-    root.add(neonL, neonR);
-
-    // Aerofólio Traseiro Neon
-    const cyberWing = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.4), neonMat);
-    cyberWing.position.set(0, 1.08, -2.0);
-    root.add(cyberWing);
-  } else {
-    // Tier 5: HYPER_F1 (Fórmula 1 / Protótipo)
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.35, 4.5), paintMat);
-    nose.position.set(0, 0.52, 0.1);
-    root.add(nose);
-
-    const sidepods = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.4, 2.1), accentMat);
-    sidepods.position.set(0, 0.52, -0.3);
-    root.add(sidepods);
-
-    // Asa dianteira F1
-    const frontWing = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.08, 0.45), accentMat);
-    frontWing.position.set(0, 0.32, 2.25);
-    root.add(frontWing);
-
-    // Asa traseira alta F1
-    const rearWing = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.1, 0.45), paintMat);
-    rearWing.position.set(0, 1.22, -2.05);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.55, 1.2), accentMat);
-    fin.position.set(0, 0.98, -1.5);
-    root.add(rearWing, fin);
-
-    // Cockpit e Capacete do Piloto
-    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.32, 0.9), darkMat);
-    cockpit.position.set(0, 0.78, -0.1);
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.2 }));
-    helmet.position.set(0, 0.98, -0.1);
-    root.add(cockpit, helmet);
-  }
-
-  // Faróis Dianteiros e Lanternas Traseiras
-  const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.12, 0.08), headlightMat);
-  hlL.position.set(-0.68, 0.65, 2.05);
-  const hlR = hlL.clone();
-  hlR.position.x = 0.68;
-
-  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.08), taillightMat);
-  tlL.position.set(-0.68, 0.68, -2.05);
-  const tlR = tlL.clone();
-  tlR.position.x = 0.68;
-  root.add(hlL, hlR, tlL, tlR);
-
-  // Esfera de Escudo (Invisível por padrão)
+  // Esfera de Escudo
   const shieldGeo = new THREE.SphereGeometry(2.6, 18, 18);
   const shieldMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.55 });
   const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
@@ -287,7 +139,7 @@ export function createDetailedCarMesh(carTypeId = 'STARTER', customColor = null)
   shieldMesh.visible = false;
   root.add(shieldMesh);
 
-  // Chamas de Turbo (Invisível por padrão)
+  // Chamas do Turbo
   const flameGeo = new THREE.ConeGeometry(0.35, 1.5, 8);
   const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
   const flameMesh = new THREE.Mesh(flameGeo, flameMat);
@@ -296,7 +148,33 @@ export function createDetailedCarMesh(carTypeId = 'STARTER', customColor = null)
   flameMesh.visible = false;
   root.add(flameMesh);
 
-  root.userData = { shieldMesh, flameMesh, carTypeId };
+  root.userData = { shieldMesh, flameMesh, carTypeId: spec.id };
+
+  // Carrega o modelo .GLB da pasta /models/
+  gltfLoader.load(
+    spec.modelFile,
+    (gltf) => {
+      const model = gltf.scene;
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      root.add(model);
+    },
+    undefined,
+    () => {
+      // Fallback simples com caixa de cor caso o .glb não seja encontrado
+      const fallback = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 0.8, 4),
+        new THREE.MeshStandardMaterial({ color: spec.color || 0x3b82f6 })
+      );
+      fallback.position.y = 0.5;
+      root.add(fallback);
+    }
+  );
+
   return root;
 }
 
@@ -304,7 +182,7 @@ export function createDetailedCarMesh(carTypeId = 'STARTER', customColor = null)
 // SHOWROOM DA GARAGEM 3D
 // ==========================================
 const garageGroup = new THREE.Group();
-garageGroup.position.set(0, 500, 0); // Isolado no céu para não colidir com a pista
+garageGroup.position.set(0, 500, 0);
 scene.add(garageGroup);
 
 const pedestalGeo = new THREE.CylinderGeometry(3.8, 4.2, 0.4, 32);
@@ -339,7 +217,7 @@ function refreshGarageShowroom() {
   document.getElementById('garage-car-desc').textContent = spec.desc;
 
   const spdPct = Math.round((spec.topSpeed / 60) * 100);
-  const accPct = Math.round((spec.accel / 52) * 100);
+  const accPct = Math.round((spec.accel / 50) * 100);
   const hndPct = Math.round((spec.handling / 3.2) * 100);
 
   document.getElementById('stat-speed-txt').textContent = `${spdPct}%`;
@@ -366,7 +244,7 @@ function refreshGarageShowroom() {
 }
 
 // ==========================================
-// CONSTRUÇÃO DE PISTAS 3D COM TRAJETO E ZEBRAS
+// CONSTRUÇÃO DE PISTAS 3D
 // ==========================================
 const trackMeshGroup = new THREE.Group();
 scene.add(trackMeshGroup);
@@ -390,7 +268,6 @@ function buildTrackScene(trackConfig) {
   }
   clearMapObjects();
 
-  // Solo
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(1400, 1400),
     new THREE.MeshLambertMaterial({ color: trackConfig.groundColor })
@@ -420,7 +297,6 @@ function buildTrackScene(trackConfig) {
       roadIndices.push(a, b, c, b, d, c);
     }
 
-    // Zebras nas bordas (Curbs) e Postes de Guardrail
     if (i < segments) {
       const curbColor = i % 2 === 0 ? trackConfig.curbColorA : trackConfig.curbColorB;
       const curbMat = new THREE.MeshBasicMaterial({ color: curbColor });
@@ -436,7 +312,6 @@ function buildTrackScene(trackConfig) {
 
       trackMeshGroup.add(curbL, curbR);
 
-      // Linha tracejada central
       if (i % 3 === 0) {
         const centerPt = getPointAtProgress(t, 0, trackConfig);
         const dash = new THREE.Mesh(
@@ -458,7 +333,7 @@ function buildTrackScene(trackConfig) {
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
   trackMeshGroup.add(roadMesh);
 
-  // Pórtico da Linha de Largada / Chegada (Progress = 0)
+  // Linha de Partida
   const startPt = getPointAtProgress(0, 0, trackConfig);
   const startGroup = new THREE.Group();
   startGroup.position.set(startPt.x, 0, startPt.z);
@@ -486,7 +361,6 @@ function buildTrackScene(trackConfig) {
   startGroup.add(pillarL, pillarR, banner);
   trackMeshGroup.add(startGroup);
 
-  // Decoração Temática ao redor da pista
   for (let i = 0; i < 45; i++) {
     const prog = i / 45;
     const side = (i % 2 === 0 ? 1 : -1) * (halfW + 14 + (i % 3) * 8);
@@ -525,7 +399,7 @@ function buildTrackScene(trackConfig) {
 buildTrackScene(TRACKS.SPEEDWAY);
 
 // ==========================================
-// SINCRONIZAÇÃO DE CARROS E ITENS 3D
+// SINCRONIZAÇÃO DE CARROS E ITENS
 // ==========================================
 function syncCarsWithRoom(playersList) {
   const activeIds = new Set(playersList.map(p => p.id));
@@ -565,7 +439,6 @@ function syncCarsWithRoom(playersList) {
 }
 
 function syncPickups3D(msg) {
-  // Caixas de Poder Estilo Mario Kart
   if (msg.itemBoxes) {
     for (const b of msg.itemBoxes) {
       let mesh = itemBoxMeshes.get(b.id);
@@ -582,7 +455,6 @@ function syncPickups3D(msg) {
     }
   }
 
-  // Moedas Douradas 3D
   if (msg.coins) {
     for (const c of msg.coins) {
       let mesh = coinMeshes.get(c.id);
@@ -600,7 +472,6 @@ function syncPickups3D(msg) {
     }
   }
 
-  // Poças de Óleo
   if (msg.oilTraps) {
     const activeIds = new Set(msg.oilTraps.map(o => o.id));
     for (const [id, m] of oilTrapMeshes.entries()) {
@@ -624,7 +495,7 @@ function syncPickups3D(msg) {
 }
 
 // ==========================================
-// CONEXÃO WEBSOCKET MULTIPLAYER
+// CONEXÃO MULTIPLAYER
 // ==========================================
 const POWER_NAMES = {
   TURBO: '🔥 TURBO NITRO',
@@ -772,7 +643,7 @@ function sendMsg(payload) {
 }
 
 // ==========================================
-// INTERFACE E BOTÕES
+// EVENTOS E GARAGEM
 // ==========================================
 function renderPublicRooms(rooms) {
   const container = document.getElementById('public-rooms-list');
@@ -979,7 +850,7 @@ document.getElementById('btn-ready')?.addEventListener('click', () => sendMsg({ 
 document.getElementById('btn-host-start')?.addEventListener('click', () => sendMsg({ type: 'start_race' }));
 
 // ==========================================
-// CONTROLES (TECLADO E TOUCH)
+// CONTROLES DE TECLADO E TOUCH
 // ==========================================
 function transmitInputs() {
   const serialized = JSON.stringify(inputs);
@@ -1043,7 +914,7 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
 });
 
 // ==========================================
-// LOOP DE ANIMAÇÃO E CÂMERA
+// LOOP DE ANIMAÇÃO
 // ==========================================
 let lastFrameTime = performance.now();
 
@@ -1052,7 +923,6 @@ function animate(now) {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
   lastFrameTime = now;
 
-  // Animação de giro das Caixas de Poder e Moedas
   for (const box of itemBoxMeshes.values()) {
     box.rotation.y += dt * 2.2;
     box.rotation.x += dt * 1.3;
@@ -1061,7 +931,6 @@ function animate(now) {
     coin.rotation.y += dt * 3.5;
   }
 
-  // Câmera na Garagem
   if (inGarageView) {
     if (garagePreviewCar) {
       garagePreviewCar.rotation.y += dt * 0.85;
@@ -1072,7 +941,6 @@ function animate(now) {
     return;
   }
 
-  // Interpolação suave dos carros
   const interpFactor = Math.min(1, dt * 15);
   for (const ent of carEntities.values()) {
     ent.mesh.position.x += (ent.targetX - ent.mesh.position.x) * interpFactor;
@@ -1098,7 +966,6 @@ function animate(now) {
     camera.position.z += (targetCamZ - camera.position.z) * Math.min(1, dt * 10);
     camera.lookAt(myCar.mesh.position.x, 1.1, myCar.mesh.position.z);
   } else {
-    // Câmera panorâmica no Menu / Lobby
     const angle = now * 0.00025;
     camera.position.set(Math.cos(angle) * 125, 48, Math.sin(angle) * 125);
     camera.lookAt(0, 0, 0);

@@ -234,7 +234,8 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
       }
     }
   </script>
@@ -255,7 +256,7 @@
           <div class="bg-amber-500/20 border border-amber-500/40 px-4 py-2 rounded-xl font-orbitron font-black text-amber-400">
             🪙 <span id="wallet-coins">0</span>
           </div>
-          <button id="btn-open-garage" class="btn-gold font-orbitron"><i class="fas fa-car mr-2"></i>Garagem (5 Carros)</button>
+          <button id="btn-open-garage" class="btn-gold font-orbitron"><i class="fas fa-car mr-2"></i>Garagem (4 Carros)</button>
           <button id="btn-gfx" class="btn-secondary text-xs">Gráficos: Alto</button>
         </div>
       </div>
@@ -263,7 +264,7 @@
       <div class="flex flex-wrap gap-3 mb-4 items-center">
         <input type="text" id="player-name" maxlength="16" placeholder="Seu Apelido..." class="flex-1 min-w-[180px]" />
         <div class="text-sm text-slate-300 bg-slate-800/80 px-3 py-2 rounded-lg border border-slate-700">
-          Carro Equipado: <strong id="equipped-car-label" class="text-cyan-400 font-orbitron">Street Pulse</strong>
+          Carro Equipado: <strong id="equipped-car-label" class="text-cyan-400 font-orbitron">Carro 1</strong>
         </div>
         <button id="btn-quick-play" class="btn-success font-orbitron"><i class="fas fa-bolt mr-2"></i> Jogar Agora</button>
       </div>
@@ -318,7 +319,7 @@
       <div class="flex justify-between items-center mb-3">
         <div>
           <span id="garage-car-tier" class="text-xs font-orbitron uppercase px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">TIER 1</span>
-          <h2 id="garage-car-name" class="font-orbitron text-2xl font-black text-white mt-1">Street Pulse</h2>
+          <h2 id="garage-car-name" class="font-orbitron text-2xl font-black text-white mt-1">Street Hatch (Car 1)</h2>
         </div>
         <div class="text-right">
           <div class="text-xs text-slate-400">SEU SALDO</div>
@@ -326,7 +327,7 @@
         </div>
       </div>
 
-      <p id="garage-car-desc" class="text-sm text-slate-300 mb-3">Compacto urbano equilibrado.</p>
+      <p id="garage-car-desc" class="text-sm text-slate-300 mb-3">Veículo inicial equilibrado.</p>
 
       <div class="space-y-2 mb-4">
         <div>
