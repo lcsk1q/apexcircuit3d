@@ -1,4 +1,4 @@
-// game.js
+// public/game.js
 import * as THREE from 'three';
 import { TRACKS, CAR_TYPES, getPointAtProgress } from '/shared/track.js';
 
@@ -10,8 +10,17 @@ let myPlayerId = null;
 let myToken = localStorage.getItem('apex_session_token') || '';
 let myName = localStorage.getItem('apex_player_name') || '';
 let currentRoom = null;
-let currentTrackConfig = TRACKS.OVAL;
+let currentTrackConfig = TRACKS.SPEEDWAY;
 let lowGraphics = localStorage.getItem('apex_low_gfx') === '1';
+
+// SISTEMA DE CARTEIRA E GARAGEM (SALVO NO NAVEGADOR)
+let walletCoins = Number(localStorage.getItem('apex_wallet_coins') || 0);
+let unlockedCars = JSON.parse(localStorage.getItem('apex_unlocked_cars') || '["STARTER"]');
+let selectedCarId = localStorage.getItem('apex_selected_car') || 'STARTER';
+if (!unlockedCars.includes('STARTER')) unlockedCars.push('STARTER');
+
+let inGarageView = false;
+let garageCarIndex = Math.max(0, CAR_TYPES.findIndex(c => c.id === selectedCarId));
 
 const inputs = { up: false, down: false, left: false, right: false };
 let lastInputSent = '';
@@ -21,8 +30,9 @@ const itemBoxMeshes = new Map();
 const coinMeshes = new Map();
 const oilTrapMeshes = new Map();
 
-// Elementos de UI
+// Elementos UI
 const elMenu = document.getElementById('menu-screen');
+const elGarage = document.getElementById('garage-screen');
 const elLobby = document.getElementById('lobby-screen');
 const elHud = document.getElementById('race-hud');
 const elResults = document.getElementById('results-screen');
@@ -33,39 +43,57 @@ const elBtnGfx = document.getElementById('btn-gfx');
 
 if (myName && elNameInput) elNameInput.value = myName;
 
-function showToast(msg) {
+function saveEconomy() {
+  localStorage.setItem('apex_wallet_coins', String(walletCoins));
+  localStorage.setItem('apex_unlocked_cars', JSON.stringify(unlockedCars));
+  localStorage.setItem('apex_selected_car', selectedCarId);
+  updateEconomyUI();
+}
+
+function updateEconomyUI() {
+  const w1 = document.getElementById('wallet-coins');
+  const w2 = document.getElementById('garage-wallet');
+  const eq = document.getElementById('equipped-car-label');
+  if (w1) w1.textContent = walletCoins;
+  if (w2) w2.textContent = walletCoins;
+  const carObj = CAR_TYPES.find(c => c.id === selectedCarId) || CAR_TYPES[0];
+  if (eq) eq.textContent = carObj.name;
+}
+updateEconomyUI();
+
+function showToast(msg, color = '#ef4444') {
   const t = document.getElementById('toast');
   if (!t) return;
+  t.style.background = color;
   t.textContent = msg;
   t.classList.remove('hidden');
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+  showToast._timer = setTimeout(() => t.classList.add('hidden'), 3200);
 }
 
-// MOTOR 3D
+// ==========================================
+// MOTOR 3D THREE.JS
+// ==========================================
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowGraphics, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b132b);
-scene.fog = new THREE.FogExp2(0x0b132b, 0.0035);
+scene.background = new THREE.Color(0x0b172a);
+scene.fog = new THREE.FogExp2(0x0b172a, 0.0028);
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 450);
-camera.position.set(0, 28, -45);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 550);
+camera.position.set(0, 25, -40);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
 scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.3);
-dirLight.position.set(60, 110, 40);
-dirLight.castShadow = !lowGraphics;
+const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
+dirLight.position.set(80, 140, 60);
 scene.add(dirLight);
 
 function applyGraphicsMode() {
   renderer.setPixelRatio(lowGraphics ? 1 : Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = !lowGraphics;
-  dirLight.castShadow = !lowGraphics;
   if (elBtnGfx) elBtnGfx.textContent = `Gráficos: ${lowGraphics ? 'Baixo' : 'Alto'}`;
 }
 applyGraphicsMode();
@@ -84,28 +112,294 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// CONSTRUÇÃO DE PISTAS
-let trackMeshGroup = new THREE.Group();
+// ==========================================
+// MODELAGEM 3D DETALHADA DOS 5 CARROS
+// ==========================================
+export function createDetailedCarMesh(carTypeId = 'STARTER', customColor = null) {
+  const spec = CAR_TYPES.find(c => c.id === carTypeId) || CAR_TYPES[0];
+  const primaryColor = new THREE.Color(customColor || spec.color);
+  const accentColor = new THREE.Color(spec.accent);
+
+  const root = new THREE.Group();
+
+  const paintMat = new THREE.MeshStandardMaterial({ color: primaryColor, roughness: 0.25, metalness: 0.55 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.3, metalness: 0.4 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.9 });
+  const tireMat = new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.9 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.8, roughness: 0.2 });
+  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+  const taillightMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+  // 4 Rodas Detalhadas
+  const wheelPositions = [
+    [-1.05, 0.42, 1.25],
+    [1.05, 0.42, 1.25],
+    [-1.05, 0.42, -1.25],
+    [1.05, 0.42, -1.25]
+  ];
+  for (const [wx, wy, wz] of wheelPositions) {
+    const wheelGroup = new THREE.Group();
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.36, 16), tireMat);
+    tire.rotation.z = Math.PI / 2;
+    wheelGroup.add(tire);
+
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.38, 12), rimMat);
+    rim.rotation.z = Math.PI / 2;
+    wheelGroup.add(rim);
+
+    wheelGroup.position.set(wx, wy, wz);
+    root.add(wheelGroup);
+  }
+
+  // Sombra embaixo do carro
+  const underbody = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.18, 3.8), darkMat);
+  underbody.position.y = 0.32;
+  root.add(underbody);
+
+  if (spec.id === 'STARTER') {
+    // Tier 1: Street Hatch Compacto
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.58, 3.7), paintMat);
+    body.position.y = 0.62;
+    root.add(body);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.52, 1.9), glassMat);
+    cabin.position.set(0, 1.1, -0.2);
+    root.add(cabin);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.08, 1.6), paintMat);
+    roof.position.set(0, 1.38, -0.2);
+    root.add(roof);
+  } else if (spec.id === 'TUNER') {
+    // Tier 2: Esportivo GT com Aerofólio e Faixa
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.52, 4.1), paintMat);
+    body.position.y = 0.58;
+    root.add(body);
+
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.53, 4.12), accentMat);
+    stripe.position.y = 0.58;
+    root.add(stripe);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.46, 1.85), glassMat);
+    cabin.position.set(0, 1.02, -0.15);
+    root.add(cabin);
+
+    // Aerofólio GT
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.08, 0.35), darkMat);
+    wing.position.set(0, 1.18, -1.85);
+    root.add(wing);
+    const strutL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.18), darkMat);
+    strutL.position.set(-0.6, 0.98, -1.85);
+    const strutR = strutL.clone();
+    strutR.position.x = 0.6;
+    root.add(strutL, strutR);
+  } else if (spec.id === 'MUSCLE') {
+    // Tier 3: V8 Muscle Car com Motor Blower no Capô
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.6, 4.25), paintMat);
+    body.position.y = 0.64;
+    root.add(body);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.46, 1.75), glassMat);
+    cabin.position.set(0, 1.1, -0.35);
+    root.add(cabin);
+
+    // Supercharger no capô
+    const blowerBase = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.25, 0.75), rimMat);
+    blowerBase.position.set(0, 1.02, 1.05);
+    const blowerIntake = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.45), darkMat);
+    blowerIntake.position.set(0, 1.18, 1.12);
+    root.add(blowerBase, blowerIntake);
+
+    // Para-choque cromado
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.15), rimMat);
+    bumper.position.set(0, 0.45, 2.15);
+    root.add(bumper);
+  } else if (spec.id === 'CYBERCAR') {
+    // Tier 4: Supercarro Cyberpunk com Luzes Neon
+    const neonMat = new THREE.MeshBasicMaterial({ color: accentColor });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.18, 0.44, 4.35), paintMat);
+    body.position.y = 0.54;
+    root.add(body);
+
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.2), glassMat);
+    canopy.position.set(0, 0.9, 0.05);
+    root.add(canopy);
+
+    // Faixas laterais de Neon
+    const neonL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 4.38), neonMat);
+    neonL.position.set(-1.1, 0.55, 0);
+    const neonR = neonL.clone();
+    neonR.position.x = 1.1;
+    root.add(neonL, neonR);
+
+    // Aerofólio Traseiro Neon
+    const cyberWing = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.4), neonMat);
+    cyberWing.position.set(0, 1.08, -2.0);
+    root.add(cyberWing);
+  } else {
+    // Tier 5: HYPER_F1 (Fórmula 1 / Protótipo)
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.35, 4.5), paintMat);
+    nose.position.set(0, 0.52, 0.1);
+    root.add(nose);
+
+    const sidepods = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.4, 2.1), accentMat);
+    sidepods.position.set(0, 0.52, -0.3);
+    root.add(sidepods);
+
+    // Asa dianteira F1
+    const frontWing = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.08, 0.45), accentMat);
+    frontWing.position.set(0, 0.32, 2.25);
+    root.add(frontWing);
+
+    // Asa traseira alta F1
+    const rearWing = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.1, 0.45), paintMat);
+    rearWing.position.set(0, 1.22, -2.05);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.55, 1.2), accentMat);
+    fin.position.set(0, 0.98, -1.5);
+    root.add(rearWing, fin);
+
+    // Cockpit e Capacete do Piloto
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.32, 0.9), darkMat);
+    cockpit.position.set(0, 0.78, -0.1);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.2 }));
+    helmet.position.set(0, 0.98, -0.1);
+    root.add(cockpit, helmet);
+  }
+
+  // Faróis Dianteiros e Lanternas Traseiras
+  const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.12, 0.08), headlightMat);
+  hlL.position.set(-0.68, 0.65, 2.05);
+  const hlR = hlL.clone();
+  hlR.position.x = 0.68;
+
+  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.08), taillightMat);
+  tlL.position.set(-0.68, 0.68, -2.05);
+  const tlR = tlL.clone();
+  tlR.position.x = 0.68;
+  root.add(hlL, hlR, tlL, tlR);
+
+  // Esfera de Escudo (Invisível por padrão)
+  const shieldGeo = new THREE.SphereGeometry(2.6, 18, 18);
+  const shieldMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.55 });
+  const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+  shieldMesh.position.y = 0.8;
+  shieldMesh.visible = false;
+  root.add(shieldMesh);
+
+  // Chamas de Turbo (Invisível por padrão)
+  const flameGeo = new THREE.ConeGeometry(0.35, 1.5, 8);
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+  const flameMesh = new THREE.Mesh(flameGeo, flameMat);
+  flameMesh.rotation.x = -Math.PI / 2;
+  flameMesh.position.set(0, 0.5, -2.6);
+  flameMesh.visible = false;
+  root.add(flameMesh);
+
+  root.userData = { shieldMesh, flameMesh, carTypeId };
+  return root;
+}
+
+// ==========================================
+// SHOWROOM DA GARAGEM 3D
+// ==========================================
+const garageGroup = new THREE.Group();
+garageGroup.position.set(0, 500, 0); // Isolado no céu para não colidir com a pista
+scene.add(garageGroup);
+
+const pedestalGeo = new THREE.CylinderGeometry(3.8, 4.2, 0.4, 32);
+const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.2 });
+const pedestalMesh = new THREE.Mesh(pedestalGeo, pedestalMat);
+garageGroup.add(pedestalMesh);
+
+const ringGeo = new THREE.RingGeometry(3.5, 3.75, 32);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4, side: THREE.DoubleSide });
+const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+ringMesh.rotation.x = Math.PI / 2;
+ringMesh.position.y = 0.22;
+garageGroup.add(ringMesh);
+
+const garageLight = new THREE.PointLight(0xffffff, 2.5, 25);
+garageLight.position.set(0, 6, 4);
+garageGroup.add(garageLight);
+
+let garagePreviewCar = null;
+
+function refreshGarageShowroom() {
+  if (garagePreviewCar) {
+    garageGroup.remove(garagePreviewCar);
+  }
+  const spec = CAR_TYPES[garageCarIndex];
+  garagePreviewCar = createDetailedCarMesh(spec.id, spec.color);
+  garagePreviewCar.position.y = 0.22;
+  garageGroup.add(garagePreviewCar);
+
+  document.getElementById('garage-car-tier').textContent = `TIER ${spec.tier}`;
+  document.getElementById('garage-car-name').textContent = spec.name;
+  document.getElementById('garage-car-desc').textContent = spec.desc;
+
+  const spdPct = Math.round((spec.topSpeed / 60) * 100);
+  const accPct = Math.round((spec.accel / 52) * 100);
+  const hndPct = Math.round((spec.handling / 3.2) * 100);
+
+  document.getElementById('stat-speed-txt').textContent = `${spdPct}%`;
+  document.getElementById('stat-speed-bar').style.width = `${spdPct}%`;
+  document.getElementById('stat-accel-txt').textContent = `${accPct}%`;
+  document.getElementById('stat-accel-bar').style.width = `${accPct}%`;
+  document.getElementById('stat-hand-txt').textContent = `${hndPct}%`;
+  document.getElementById('stat-hand-bar').style.width = `${hndPct}%`;
+
+  const btnAction = document.getElementById('btn-buy-equip-car');
+  const isUnlocked = unlockedCars.includes(spec.id);
+  const isEquipped = selectedCarId === spec.id;
+
+  if (isEquipped) {
+    btnAction.textContent = '✅ EQUIPADO';
+    btnAction.className = 'btn-secondary flex-1 font-orbitron';
+  } else if (isUnlocked) {
+    btnAction.textContent = 'EQUIPAR CARRO';
+    btnAction.className = 'btn-success flex-1 font-orbitron';
+  } else {
+    btnAction.textContent = `COMPRAR (🪙 ${spec.price})`;
+    btnAction.className = 'btn-gold flex-1 font-orbitron';
+  }
+}
+
+// ==========================================
+// CONSTRUÇÃO DE PISTAS 3D COM TRAJETO E ZEBRAS
+// ==========================================
+const trackMeshGroup = new THREE.Group();
 scene.add(trackMeshGroup);
+
+function clearMapObjects() {
+  for (const m of itemBoxMeshes.values()) scene.remove(m);
+  itemBoxMeshes.clear();
+  for (const m of coinMeshes.values()) scene.remove(m);
+  coinMeshes.clear();
+  for (const m of oilTrapMeshes.values()) scene.remove(m);
+  oilTrapMeshes.clear();
+}
 
 function buildTrackScene(trackConfig) {
   currentTrackConfig = trackConfig;
-  scene.background.setHex(trackConfig.skyColor || 0x0b132b);
-  if (scene.fog) scene.fog.color.setHex(trackConfig.skyColor || 0x0b132b);
+  scene.background.setHex(trackConfig.skyColor);
+  if (scene.fog) scene.fog.color.setHex(trackConfig.skyColor);
 
   while (trackMeshGroup.children.length > 0) {
-    const obj = trackMeshGroup.children[0];
-    trackMeshGroup.remove(obj);
+    trackMeshGroup.remove(trackMeshGroup.children[0]);
   }
+  clearMapObjects();
 
-  const groundGeo = new THREE.PlaneGeometry(1000, 1000);
-  const groundMat = new THREE.MeshLambertMaterial({ color: trackConfig.groundColor || 0x143326 });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
+  // Solo
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(1400, 1400),
+    new THREE.MeshLambertMaterial({ color: trackConfig.groundColor })
+  );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.08;
+  ground.position.y = -0.1;
   trackMeshGroup.add(ground);
 
-  const segments = 220;
+  const segments = 320;
   const halfW = trackConfig.width / 2;
   const roadPositions = [];
   const roadIndices = [];
@@ -125,38 +419,114 @@ function buildTrackScene(trackConfig) {
       const d = a + 3;
       roadIndices.push(a, b, c, b, d, c);
     }
+
+    // Zebras nas bordas (Curbs) e Postes de Guardrail
+    if (i < segments) {
+      const curbColor = i % 2 === 0 ? trackConfig.curbColorA : trackConfig.curbColorB;
+      const curbMat = new THREE.MeshBasicMaterial({ color: curbColor });
+      const curbGeo = new THREE.BoxGeometry(1.2, 0.14, 2.2);
+
+      const curbL = new THREE.Mesh(curbGeo, curbMat);
+      curbL.position.set(leftPt.x, 0.07, leftPt.z);
+      curbL.rotation.y = leftPt.heading;
+
+      const curbR = new THREE.Mesh(curbGeo, curbMat);
+      curbR.position.set(rightPt.x, 0.07, rightPt.z);
+      curbR.rotation.y = rightPt.heading;
+
+      trackMeshGroup.add(curbL, curbR);
+
+      // Linha tracejada central
+      if (i % 3 === 0) {
+        const centerPt = getPointAtProgress(t, 0, trackConfig);
+        const dash = new THREE.Mesh(
+          new THREE.BoxGeometry(0.35, 0.04, 2.1),
+          new THREE.MeshBasicMaterial({ color: 0x94a3b8 })
+        );
+        dash.position.set(centerPt.x, 0.04, centerPt.z);
+        dash.rotation.y = centerPt.heading;
+        trackMeshGroup.add(dash);
+      }
+    }
   }
 
   const roadGeo = new THREE.BufferGeometry();
   roadGeo.setAttribute('position', new THREE.Float32BufferAttribute(roadPositions, 3));
   roadGeo.setIndex(roadIndices);
   roadGeo.computeVertexNormals();
-  const roadMat = new THREE.MeshStandardMaterial({ color: trackConfig.roadColor || 0x262936, roughness: 0.8 });
+  const roadMat = new THREE.MeshStandardMaterial({ color: trackConfig.roadColor, roughness: 0.85 });
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
   trackMeshGroup.add(roadMesh);
+
+  // Pórtico da Linha de Largada / Chegada (Progress = 0)
+  const startPt = getPointAtProgress(0, 0, trackConfig);
+  const startGroup = new THREE.Group();
+  startGroup.position.set(startPt.x, 0, startPt.z);
+  startGroup.rotation.y = startPt.heading;
+
+  const startLine = new THREE.Mesh(
+    new THREE.BoxGeometry(trackConfig.width, 0.05, 2.6),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  startLine.position.y = 0.04;
+  startGroup.add(startLine);
+
+  const pillarGeo = new THREE.CylinderGeometry(0.45, 0.45, 9, 12);
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0 });
+  const pillarL = new THREE.Mesh(pillarGeo, pillarMat);
+  pillarL.position.set(-halfW - 1, 4.5, 0);
+  const pillarR = pillarL.clone();
+  pillarR.position.x = halfW + 1;
+
+  const banner = new THREE.Mesh(
+    new THREE.BoxGeometry(trackConfig.width + 3, 1.6, 0.8),
+    new THREE.MeshBasicMaterial({ color: trackConfig.curbColorA })
+  );
+  banner.position.set(0, 8.2, 0);
+  startGroup.add(pillarL, pillarR, banner);
+  trackMeshGroup.add(startGroup);
+
+  // Decoração Temática ao redor da pista
+  for (let i = 0; i < 45; i++) {
+    const prog = i / 45;
+    const side = (i % 2 === 0 ? 1 : -1) * (halfW + 14 + (i % 3) * 8);
+    const pt = getPointAtProgress(prog, side, trackConfig);
+
+    if (trackConfig.theme === 'FOREST') {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 3, 8), new THREE.MeshLambertMaterial({ color: 0x5c4033 }));
+      trunk.position.set(pt.x, 1.5, pt.z);
+      const leaves = new THREE.Mesh(new THREE.ConeGeometry(3.2, 7, 8), new THREE.MeshLambertMaterial({ color: 0x15803d }));
+      leaves.position.set(pt.x, 5.5, pt.z);
+      trackMeshGroup.add(trunk, leaves);
+    } else if (trackConfig.theme === 'DESERT') {
+      const cactus = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 5.5, 8), new THREE.MeshLambertMaterial({ color: 0x16a34a }));
+      cactus.position.set(pt.x, 2.75, pt.z);
+      trackMeshGroup.add(cactus);
+    } else if (trackConfig.theme === 'CYBER') {
+      const h = 14 + (i % 5) * 8;
+      const tower = new THREE.Mesh(
+        new THREE.BoxGeometry(6, h, 6),
+        new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: i % 2 === 0 ? 0x06b6d4 : 0xd946ef, emissiveIntensity: 0.35 })
+      );
+      tower.position.set(pt.x, h / 2, pt.z);
+      trackMeshGroup.add(tower);
+    } else if (trackConfig.theme === 'ICE') {
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(3.5, 0), new THREE.MeshStandardMaterial({ color: 0x7dd3fc, roughness: 0.1 }));
+      crystal.position.set(pt.x, 3, pt.z);
+      trackMeshGroup.add(crystal);
+    } else {
+      const rock = new THREE.Mesh(new THREE.ConeGeometry(4, 9, 6), new THREE.MeshStandardMaterial({ color: 0x27272a, emissive: 0xea580c, emissiveIntensity: 0.25 }));
+      rock.position.set(pt.x, 4.5, pt.z);
+      trackMeshGroup.add(rock);
+    }
+  }
 }
 
-buildTrackScene(TRACKS.OVAL);
+buildTrackScene(TRACKS.SPEEDWAY);
 
-// CRIAÇÃO DE MODELOS DE CARRO
-function createCarMesh(colorHex) {
-  const group = new THREE.Group();
-  const bodyGeo = new THREE.BoxGeometry(2.0, 0.65, 3.8);
-  const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.3, metalness: 0.3 });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.55;
-  group.add(body);
-
-  const cabinGeo = new THREE.BoxGeometry(1.5, 0.5, 1.6);
-  const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
-  const cabin = new THREE.Mesh(cabinGeo, cabinMat);
-  cabin.position.set(0, 1.0, -0.2);
-  group.add(cabin);
-
-  scene.add(group);
-  return group;
-}
-
+// ==========================================
+// SINCRONIZAÇÃO DE CARROS E ITENS 3D
+// ==========================================
 function syncCarsWithRoom(playersList) {
   const activeIds = new Set(playersList.map(p => p.id));
 
@@ -168,13 +538,18 @@ function syncCarsWithRoom(playersList) {
   }
 
   for (const p of playersList) {
-    if (!carEntities.has(p.id)) {
-      const mesh = createCarMesh(p.color);
+    const existing = carEntities.get(p.id);
+    if (!existing || existing.carType !== p.carType) {
+      if (existing) scene.remove(existing.mesh);
+      const mesh = createDetailedCarMesh(p.carType, p.color);
       mesh.position.set(p.x, 0, p.z);
       mesh.rotation.y = p.heading;
+      scene.add(mesh);
+
       carEntities.set(p.id, {
         id: p.id,
         name: p.name,
+        carType: p.carType,
         mesh,
         targetX: p.x,
         targetZ: p.z,
@@ -182,15 +557,83 @@ function syncCarsWithRoom(playersList) {
         speed: p.speed || 0
       });
     } else {
-      const ent = carEntities.get(p.id);
-      ent.targetX = p.x;
-      ent.targetZ = p.z;
-      ent.targetH = p.heading;
+      existing.targetX = p.x;
+      existing.targetZ = p.z;
+      existing.targetH = p.heading;
     }
   }
 }
 
-// CONEXÃO WEBSOCKET
+function syncPickups3D(msg) {
+  // Caixas de Poder Estilo Mario Kart
+  if (msg.itemBoxes) {
+    for (const b of msg.itemBoxes) {
+      let mesh = itemBoxMeshes.get(b.id);
+      if (!mesh) {
+        mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(1.6, 1.6, 1.6),
+          new THREE.MeshNormalMaterial({ wireframe: false })
+        );
+        scene.add(mesh);
+        itemBoxMeshes.set(b.id, mesh);
+      }
+      mesh.position.set(b.x, 1.3, b.z);
+      mesh.visible = b.active;
+    }
+  }
+
+  // Moedas Douradas 3D
+  if (msg.coins) {
+    for (const c of msg.coins) {
+      let mesh = coinMeshes.get(c.id);
+      if (!mesh) {
+        mesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.85, 0.85, 0.22, 16),
+          new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.8, roughness: 0.2, emissive: 0xd97706, emissiveIntensity: 0.3 })
+        );
+        mesh.rotation.z = Math.PI / 2;
+        scene.add(mesh);
+        coinMeshes.set(c.id, mesh);
+      }
+      mesh.position.set(c.x, 1.0, c.z);
+      mesh.visible = c.active;
+    }
+  }
+
+  // Poças de Óleo
+  if (msg.oilTraps) {
+    const activeIds = new Set(msg.oilTraps.map(o => o.id));
+    for (const [id, m] of oilTrapMeshes.entries()) {
+      if (!activeIds.has(id)) {
+        scene.remove(m);
+        oilTrapMeshes.delete(id);
+      }
+    }
+    for (const o of msg.oilTraps) {
+      if (!oilTrapMeshes.has(o.id)) {
+        const oil = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.7, 1.7, 0.08, 16),
+          new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.1 })
+        );
+        oil.position.set(o.x, 0.06, o.z);
+        scene.add(oil);
+        oilTrapMeshes.set(o.id, oil);
+      }
+    }
+  }
+}
+
+// ==========================================
+// CONEXÃO WEBSOCKET MULTIPLAYER
+// ==========================================
+const POWER_NAMES = {
+  TURBO: '🔥 TURBO NITRO',
+  SHIELD: '🛡️ ESCUDO',
+  EMP: '⚡ CHOQUE EMP',
+  OIL: '🛢️ POÇA DE ÓLEO',
+  MISSILE: '🚀 MÍSSIL CASCO'
+};
+
 function connectWebSocket() {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${window.location.host}`);
@@ -202,7 +645,8 @@ function connectWebSocket() {
     ws.send(JSON.stringify({
       type: 'hello',
       token: myToken,
-      name: myName
+      name: myName,
+      carType: selectedCarId
     }));
   });
 
@@ -232,6 +676,28 @@ function connectWebSocket() {
         break;
       }
 
+      case 'race_rewards': {
+        const reward = msg.rewards.find(r => r.id === myPlayerId);
+        if (reward) {
+          walletCoins += reward.totalEarned;
+          saveEconomy();
+          const banner = document.getElementById('results-reward-banner');
+          if (banner) {
+            banner.textContent = `🏆 ${reward.position}º Lugar! Você ganhou +${reward.totalEarned} 🪙 Moedas!`;
+          }
+        }
+        const standingsEl = document.getElementById('results-standings');
+        if (standingsEl) {
+          standingsEl.innerHTML = msg.rewards.map(r => `
+            <div class="flex justify-between items-center bg-slate-800/80 px-4 py-2 rounded-lg">
+              <span><strong>${r.position}º</strong> ${r.name}</span>
+              <span class="text-amber-400 font-orbitron font-bold">+${r.totalEarned} 🪙</span>
+            </div>
+          `).join('');
+        }
+        break;
+      }
+
       case 'telemetry': {
         if (!currentRoom) return;
         currentRoom.state = msg.state;
@@ -246,6 +712,8 @@ function connectWebSocket() {
           elCountdown.classList.add('hidden');
         }
 
+        syncPickups3D(msg);
+
         for (const c of msg.cars) {
           const ent = carEntities.get(c.id);
           if (ent) {
@@ -253,6 +721,12 @@ function connectWebSocket() {
             ent.targetZ = c.z;
             ent.targetH = c.h;
             ent.speed = c.s;
+            if (ent.mesh.userData.shieldMesh) {
+              ent.mesh.userData.shieldMesh.visible = Boolean(c.shield);
+            }
+            if (ent.mesh.userData.flameMesh) {
+              ent.mesh.userData.flameMesh.visible = Boolean(c.boost);
+            }
           }
           if (c.id === myPlayerId) {
             const elPos = document.getElementById('hud-pos');
@@ -263,9 +737,9 @@ function connectWebSocket() {
 
             if (elPos) elPos.textContent = `${c.pos} / ${msg.cars.length}`;
             if (elLap) elLap.textContent = `${Math.min(c.lap, currentTrackConfig.totalLaps)} / ${currentTrackConfig.totalLaps}`;
-            if (elSpeed) elSpeed.textContent = `${Math.round(Math.abs(c.s) * 4.2)} km/h`;
+            if (elSpeed) elSpeed.textContent = `${Math.round(Math.abs(c.s) * 4.0)} km/h`;
             if (elCoins) elCoins.textContent = `🪙 ${c.coins || 0}`;
-            if (elPower) elPower.textContent = c.power ? `ITEM: [${c.power}]` : 'ITEM: [VAZIO]';
+            if (elPower) elPower.textContent = c.power ? POWER_NAMES[c.power] || c.power : '🎲 VAZIO';
           }
         }
         break;
@@ -274,6 +748,7 @@ function connectWebSocket() {
       case 'left_room': {
         currentRoom = null;
         syncCarsWithRoom([]);
+        clearMapObjects();
         updateUIForRoomState();
         break;
       }
@@ -296,13 +771,15 @@ function sendMsg(payload) {
   }
 }
 
-// GERENCIAMENTO DE INTERFACE
+// ==========================================
+// INTERFACE E BOTÕES
+// ==========================================
 function renderPublicRooms(rooms) {
   const container = document.getElementById('public-rooms-list');
   if (!container) return;
 
   if (!rooms || rooms.length === 0) {
-    container.innerHTML = `<div style="color: var(--muted); padding: 12px;">Nenhuma sala pública aberta. Clique em <strong>Jogar Agora</strong> para criar uma!</div>`;
+    container.innerHTML = `<div class="text-slate-400 p-3">Nenhuma sala aberta. Clique em <strong>Jogar Agora</strong> ou crie uma sala!</div>`;
     return;
   }
 
@@ -312,11 +789,12 @@ function renderPublicRooms(rooms) {
     div.className = 'room-card';
     const isLobby = r.state === 'LOBBY';
     const canJoin = (r.playersCount < r.maxPlayers) && (isLobby || r.allowMidRaceJoin);
+    const trackName = TRACKS[r.trackId]?.name || r.trackId;
 
     div.innerHTML = `
       <div>
-        <strong>${r.name}</strong> <span style="color:var(--muted); font-size:0.8rem;">(${r.trackId})</span>
-        <div style="font-size:0.8rem; color:var(--muted);">Jogadores: ${r.playersCount} / ${r.maxPlayers}</div>
+        <strong>${r.name}</strong> <span class="text-xs text-amber-400 ml-1">(${trackName})</span>
+        <div class="text-xs text-slate-400">Pilotos: ${r.playersCount} / ${r.maxPlayers} • ${isLobby ? 'No Lobby' : 'Correndo'}</div>
       </div>
       <button class="btn-join-item" data-id="${r.id}" ${!canJoin ? 'disabled style="opacity:0.4;"' : ''}>Entrar</button>
     `;
@@ -326,67 +804,75 @@ function renderPublicRooms(rooms) {
   container.querySelectorAll('.btn-join-item').forEach(btn => {
     btn.addEventListener('click', () => {
       savePlayerName();
-      sendMsg({ type: 'join_room', roomId: btn.dataset.id });
+      sendMsg({ type: 'join_room', roomId: btn.dataset.id, carType: selectedCarId });
     });
   });
 }
 
 function updateUIForRoomState() {
+  if (inGarageView) return;
+
   if (!currentRoom) {
-    if (elMenu) elMenu.classList.remove('hidden');
-    if (elLobby) elLobby.classList.add('hidden');
-    if (elHud) elHud.classList.add('hidden');
-    if (elResults) elResults.classList.add('hidden');
-    if (elTouchControls) elTouchControls.classList.remove('active');
+    elMenu.classList.remove('hidden');
+    elGarage.classList.add('hidden');
+    elLobby.classList.add('hidden');
+    elHud.classList.add('hidden');
+    elResults.classList.add('hidden');
+    elTouchControls.classList.remove('active');
     return;
   }
 
-  if (elMenu) elMenu.classList.add('hidden');
+  elMenu.classList.add('hidden');
+  elGarage.classList.add('hidden');
 
   if (currentRoom.state === 'LOBBY') {
-    if (elLobby) elLobby.classList.remove('hidden');
-    if (elHud) elHud.classList.add('hidden');
-    if (elResults) elResults.classList.add('hidden');
-    if (elTouchControls) elTouchControls.classList.remove('active');
+    elLobby.classList.remove('hidden');
+    elHud.classList.add('hidden');
+    elResults.classList.add('hidden');
+    elTouchControls.classList.remove('active');
 
-    const title = document.getElementById('lobby-room-title');
-    const code = document.getElementById('lobby-room-code');
-    if (title) title.textContent = currentRoom.name;
-    if (code) code.textContent = currentRoom.id;
+    document.getElementById('lobby-room-title').textContent = currentRoom.name;
+    document.getElementById('lobby-room-code').textContent = currentRoom.id;
+    document.getElementById('lobby-track-name').textContent = TRACKS[currentRoom.trackId]?.name || currentRoom.trackId;
 
     const pGrid = document.getElementById('lobby-players');
-    if (pGrid) {
-      pGrid.innerHTML = '';
-      let myPlayer = null;
-      for (const p of currentRoom.players) {
-        if (p.id === myPlayerId) myPlayer = p;
-        const item = document.createElement('div');
-        item.className = 'player-item';
-        item.style.borderLeft = `5px solid ${p.color}`;
-        item.innerHTML = `<div><strong>${p.name}</strong></div><div>${p.ready ? '✅ Pronto' : '⏳ Aguardando'}</div>`;
-        pGrid.appendChild(item);
-      }
+    pGrid.innerHTML = '';
+    let myPlayer = null;
+    for (const p of currentRoom.players) {
+      if (p.id === myPlayerId) myPlayer = p;
+      const carSpec = CAR_TYPES.find(c => c.id === p.carType) || CAR_TYPES[0];
+      const item = document.createElement('div');
+      item.className = 'player-item';
+      item.style.borderLeft = `5px solid ${p.color}`;
+      item.innerHTML = `
+        <div>
+          <strong>${p.name}</strong>
+          <div class="text-xs text-cyan-300">${carSpec.name}</div>
+        </div>
+        <div>${p.ready ? '✅ Pronto' : '⏳ Aguardando'}</div>
+      `;
+      pGrid.appendChild(item);
+    }
 
-      const btnReady = document.getElementById('btn-ready');
-      if (btnReady && myPlayer) {
-        btnReady.textContent = myPlayer.ready ? 'Cancelar Pronto' : 'Marcar Pronto';
-      }
+    const btnReady = document.getElementById('btn-ready');
+    if (btnReady && myPlayer) {
+      btnReady.textContent = myPlayer.ready ? 'Cancelar Pronto' : 'Marcar Pronto';
+    }
 
-      const btnHostStart = document.getElementById('btn-host-start');
-      if (btnHostStart) {
-        if (currentRoom.hostId === myPlayerId) btnHostStart.classList.remove('hidden');
-        else btnHostStart.classList.add('hidden');
-      }
+    const btnHostStart = document.getElementById('btn-host-start');
+    if (btnHostStart) {
+      if (currentRoom.hostId === myPlayerId) btnHostStart.classList.remove('hidden');
+      else btnHostStart.classList.add('hidden');
     }
   } else if (currentRoom.state === 'COUNTDOWN' || currentRoom.state === 'RACING') {
-    if (elLobby) elLobby.classList.add('hidden');
-    if (elResults) elResults.classList.add('hidden');
-    if (elHud) elHud.classList.remove('hidden');
-    if (elTouchControls) elTouchControls.classList.add('active');
+    elLobby.classList.add('hidden');
+    elResults.classList.add('hidden');
+    elHud.classList.remove('hidden');
+    elTouchControls.classList.add('active');
   } else if (currentRoom.state === 'FINISHED') {
-    if (elHud) elHud.classList.add('hidden');
-    if (elTouchControls) elTouchControls.classList.remove('active');
-    if (elResults) elResults.classList.remove('hidden');
+    elHud.classList.add('hidden');
+    elTouchControls.classList.remove('active');
+    elResults.classList.remove('hidden');
   }
 }
 
@@ -399,82 +885,102 @@ function savePlayerName() {
   }
 }
 
-// BINDING DE EVENTOS DA INTERFACE
-const btnQuickPlay = document.getElementById('btn-quick-play');
-if (btnQuickPlay) {
-  btnQuickPlay.addEventListener('click', () => {
-    savePlayerName();
-    sendMsg({ type: 'quick_play' });
-  });
-}
+// Botões da Garagem
+document.getElementById('btn-open-garage')?.addEventListener('click', () => {
+  inGarageView = true;
+  elMenu.classList.add('hidden');
+  elGarage.classList.remove('hidden');
+  garageCarIndex = Math.max(0, CAR_TYPES.findIndex(c => c.id === selectedCarId));
+  refreshGarageShowroom();
+});
 
-const btnRefresh = document.getElementById('btn-refresh-rooms');
-if (btnRefresh) {
-  btnRefresh.addEventListener('click', () => sendMsg({ type: 'get_rooms' }));
-}
+document.getElementById('btn-close-garage')?.addEventListener('click', () => {
+  inGarageView = false;
+  elGarage.classList.add('hidden');
+  elMenu.classList.remove('hidden');
+});
 
-const btnOpenCreate = document.getElementById('btn-open-create');
-if (btnOpenCreate) {
-  btnOpenCreate.addEventListener('click', () => {
-    const box = document.getElementById('create-room-box');
-    if (box) box.classList.remove('hidden');
-  });
-}
+document.getElementById('btn-prev-car')?.addEventListener('click', () => {
+  garageCarIndex = (garageCarIndex - 1 + CAR_TYPES.length) % CAR_TYPES.length;
+  refreshGarageShowroom();
+});
 
-const btnCancelCreate = document.getElementById('btn-cancel-create');
-if (btnCancelCreate) {
-  btnCancelCreate.addEventListener('click', () => {
-    const box = document.getElementById('create-room-box');
-    if (box) box.classList.add('hidden');
-  });
-}
+document.getElementById('btn-next-car')?.addEventListener('click', () => {
+  garageCarIndex = (garageCarIndex + 1) % CAR_TYPES.length;
+  refreshGarageShowroom();
+});
 
-const btnConfirmCreate = document.getElementById('btn-confirm-create');
-if (btnConfirmCreate) {
-  btnConfirmCreate.addEventListener('click', () => {
-    savePlayerName();
-    const nameEl = document.getElementById('new-room-name');
-    const maxEl = document.getElementById('new-room-max');
-    const trackEl = document.getElementById('new-room-track');
-
-    sendMsg({
-      type: 'create_room',
-      roomName: nameEl ? nameEl.value.trim() : 'Sala',
-      maxPlayers: maxEl ? Number(maxEl.value) : 6,
-      trackId: trackEl ? trackEl.value : 'OVAL',
-      isPrivate: false,
-      allowMidRaceJoin: false
-    });
-
-    const box = document.getElementById('create-room-box');
-    if (box) box.classList.add('hidden');
-  });
-}
-
-const btnJoinCode = document.getElementById('btn-join-code');
-if (btnJoinCode) {
-  btnJoinCode.addEventListener('click', () => {
-    savePlayerName();
-    const codeEl = document.getElementById('join-code-input');
-    if (codeEl && codeEl.value) {
-      sendMsg({ type: 'join_room', roomId: codeEl.value.trim().toUpperCase() });
+document.getElementById('btn-buy-equip-car')?.addEventListener('click', () => {
+  const spec = CAR_TYPES[garageCarIndex];
+  if (unlockedCars.includes(spec.id)) {
+    selectedCarId = spec.id;
+    saveEconomy();
+    refreshGarageShowroom();
+    sendMsg({ type: 'set_car', carType: selectedCarId });
+    showToast(`${spec.name} equipado!`, '#10b981');
+  } else {
+    if (walletCoins >= spec.price) {
+      walletCoins -= spec.price;
+      unlockedCars.push(spec.id);
+      selectedCarId = spec.id;
+      saveEconomy();
+      refreshGarageShowroom();
+      sendMsg({ type: 'set_car', carType: selectedCarId });
+      showToast(`🎉 Você desbloqueou o ${spec.name}!`, '#10b981');
+    } else {
+      showToast(`Moedas insuficientes! Faltam 🪙 ${spec.price - walletCoins} moedas.`);
     }
+  }
+});
+
+// Botões do Menu e Lobby
+document.getElementById('btn-quick-play')?.addEventListener('click', () => {
+  savePlayerName();
+  sendMsg({ type: 'quick_play', carType: selectedCarId });
+});
+
+document.getElementById('btn-refresh-rooms')?.addEventListener('click', () => sendMsg({ type: 'get_rooms' }));
+
+document.getElementById('btn-open-create')?.addEventListener('click', () => {
+  document.getElementById('create-room-box')?.classList.remove('hidden');
+});
+
+document.getElementById('btn-cancel-create')?.addEventListener('click', () => {
+  document.getElementById('create-room-box')?.classList.add('hidden');
+});
+
+document.getElementById('btn-confirm-create')?.addEventListener('click', () => {
+  savePlayerName();
+  const nameEl = document.getElementById('new-room-name');
+  const maxEl = document.getElementById('new-room-max');
+  const trackEl = document.getElementById('new-room-track');
+
+  sendMsg({
+    type: 'create_room',
+    roomName: nameEl ? nameEl.value.trim() : 'Sala GP',
+    maxPlayers: maxEl ? Number(maxEl.value) : 6,
+    trackId: trackEl ? trackEl.value : 'SPEEDWAY',
+    carType: selectedCarId
   });
-}
+  document.getElementById('create-room-box')?.classList.add('hidden');
+});
 
-const btnLeaveLobby = document.getElementById('btn-leave-lobby');
-if (btnLeaveLobby) btnLeaveLobby.addEventListener('click', () => sendMsg({ type: 'leave_room' }));
+document.getElementById('btn-join-code')?.addEventListener('click', () => {
+  savePlayerName();
+  const codeEl = document.getElementById('join-code-input');
+  if (codeEl && codeEl.value) {
+    sendMsg({ type: 'join_room', roomId: codeEl.value.trim().toUpperCase(), carType: selectedCarId });
+  }
+});
 
-const btnLeaveRace = document.getElementById('btn-leave-race');
-if (btnLeaveRace) btnLeaveRace.addEventListener('click', () => sendMsg({ type: 'leave_room' }));
+document.getElementById('btn-leave-lobby')?.addEventListener('click', () => sendMsg({ type: 'leave_room' }));
+document.getElementById('btn-leave-race')?.addEventListener('click', () => sendMsg({ type: 'leave_room' }));
+document.getElementById('btn-ready')?.addEventListener('click', () => sendMsg({ type: 'toggle_ready' }));
+document.getElementById('btn-host-start')?.addEventListener('click', () => sendMsg({ type: 'start_race' }));
 
-const btnReady = document.getElementById('btn-ready');
-if (btnReady) btnReady.addEventListener('click', () => sendMsg({ type: 'toggle_ready' }));
-
-const btnHostStart = document.getElementById('btn-host-start');
-if (btnHostStart) btnHostStart.addEventListener('click', () => sendMsg({ type: 'start_race' }));
-
-// CONTROLES DE ENTRADA (TECLADO / TOUCH)
+// ==========================================
+// CONTROLES (TECLADO E TOUCH)
+// ==========================================
 function transmitInputs() {
   const serialized = JSON.stringify(inputs);
   if (serialized !== lastInputSent) {
@@ -493,6 +999,7 @@ const KEY_MAP = {
 window.addEventListener('keydown', (e) => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   if (e.code === 'Space') {
+    e.preventDefault();
     sendMsg({ type: 'use_power' });
     return;
   }
@@ -535,30 +1042,66 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
   btn.addEventListener('pointerleave', release);
 });
 
-// LOOP DE RENDERIZAÇÃO
+// ==========================================
+// LOOP DE ANIMAÇÃO E CÂMERA
+// ==========================================
 let lastFrameTime = performance.now();
+
 function animate(now) {
   requestAnimationFrame(animate);
   const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
   lastFrameTime = now;
 
-  const interpFactor = Math.min(1, dt * 14);
+  // Animação de giro das Caixas de Poder e Moedas
+  for (const box of itemBoxMeshes.values()) {
+    box.rotation.y += dt * 2.2;
+    box.rotation.x += dt * 1.3;
+  }
+  for (const coin of coinMeshes.values()) {
+    coin.rotation.y += dt * 3.5;
+  }
+
+  // Câmera na Garagem
+  if (inGarageView) {
+    if (garagePreviewCar) {
+      garagePreviewCar.rotation.y += dt * 0.85;
+    }
+    camera.position.set(0, 503.2, 7.2);
+    camera.lookAt(0, 500.7, 0);
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // Interpolação suave dos carros
+  const interpFactor = Math.min(1, dt * 15);
   for (const ent of carEntities.values()) {
     ent.mesh.position.x += (ent.targetX - ent.mesh.position.x) * interpFactor;
     ent.mesh.position.z += (ent.targetZ - ent.mesh.position.z) * interpFactor;
-    ent.mesh.rotation.y = ent.targetH;
+
+    let diffH = ent.targetH - ent.mesh.rotation.y;
+    while (diffH > Math.PI) diffH -= Math.PI * 2;
+    while (diffH < -Math.PI) diffH += Math.PI * 2;
+    ent.mesh.rotation.y += diffH * interpFactor;
   }
 
   const myCar = carEntities.get(myPlayerId);
   if (myCar && currentRoom && (currentRoom.state === 'COUNTDOWN' || currentRoom.state === 'RACING')) {
     const h = myCar.mesh.rotation.y;
-    const distBack = 10.5;
-    const height = 5.2;
+    const distBack = 10.2;
+    const height = 4.8;
 
-    camera.position.x = myCar.mesh.position.x - Math.sin(h) * distBack;
-    camera.position.y = height;
-    camera.position.z = myCar.mesh.position.z - Math.cos(h) * distBack;
-    camera.lookAt(myCar.mesh.position.x, 1.2, myCar.mesh.position.z);
+    const targetCamX = myCar.mesh.position.x - Math.sin(h) * distBack;
+    const targetCamZ = myCar.mesh.position.z - Math.cos(h) * distBack;
+
+    camera.position.x += (targetCamX - camera.position.x) * Math.min(1, dt * 10);
+    camera.position.y += (height - camera.position.y) * Math.min(1, dt * 10);
+    camera.position.z += (targetCamZ - camera.position.z) * Math.min(1, dt * 10);
+    camera.lookAt(myCar.mesh.position.x, 1.1, myCar.mesh.position.z);
+  } else {
+    // Câmera panorâmica no Menu / Lobby
+    const angle = now * 0.00025;
+    camera.position.set(Math.cos(angle) * 125, 48, Math.sin(angle) * 125);
+    camera.lookAt(0, 0, 0);
   }
 
   renderer.render(scene, camera);
