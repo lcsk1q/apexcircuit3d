@@ -1,26 +1,60 @@
-// Geometria compartilhada entre Servidor (Física) e Cliente (Renderização 3D)
-export const TRACK = {
-  straightLength: 130, // Comprimento das retas
-  radius: 52,          // Raio das curvas
-  width: 20,           // Largura da pista
-  totalLaps: 3,        // Voltas por corrida
-  carRadius: 1.35      // Raio de colisão esférica dos carros
+//shared/track.js
+export const TRACKS = {
+  OVAL: {
+    id: 'OVAL',
+    name: 'Classic Speedway',
+    straightLength: 130,
+    radius: 52,
+    width: 20,
+    totalLaps: 3,
+    carRadius: 1.35,
+    skyColor: 0x0b132b,
+    groundColor: 0x143326,
+    roadColor: 0x262936
+  },
+  DESERT: {
+    id: 'DESERT',
+    name: 'Canyon Desert',
+    straightLength: 160,
+    radius: 40,
+    width: 22,
+    totalLaps: 3,
+    carRadius: 1.35,
+    skyColor: 0xf59e0b,
+    groundColor: 0x78350f,
+    roadColor: 0x451a03
+  },
+  CYBER: {
+    id: 'CYBER',
+    name: 'Neon Cyber City',
+    straightLength: 110,
+    radius: 60,
+    width: 18,
+    totalLaps: 4,
+    carRadius: 1.35,
+    skyColor: 0x020617,
+    groundColor: 0x090d16,
+    roadColor: 0x0f172a
+  }
 };
 
-/**
- * Calcula a distância de um ponto (x, z) até o centro da pista oval,
- * a normal da pista e o progresso normalizado (0.0 a 1.0) ao longo da volta.
- */
-export function getTrackMetrics(x, z) {
-  const L = TRACK.straightLength / 2;
-  const R = TRACK.radius;
+export const CAR_TYPES = [
+  { id: 'APEX', name: 'Cyber Apex', color: '#3b82f6' },
+  { id: 'DEMON', name: 'Speed Demon', color: '#ef4444' },
+  { id: 'MUSCLE', name: 'Retro Muscle', color: '#f59e0b' },
+  { id: 'BEAST', name: 'Offroad Beast', color: '#10b981' },
+  { id: 'FORMULA', name: 'Hyper Formula', color: '#8b5cf6' }
+];
+
+export function getTrackMetrics(x, z, trackConfig = TRACKS.OVAL) {
+  const L = trackConfig.straightLength / 2;
+  const R = trackConfig.radius;
   
   let cx = 0, cz = 0;
   let nx = 0, nz = 0;
   let distFromCenter = 0;
 
   if (z >= -L && z <= L) {
-    // Nas retas (Direita: x > 0, Esquerda: x < 0)
     if (x >= 0) {
       cx = R; cz = z;
       distFromCenter = x - R;
@@ -31,50 +65,38 @@ export function getTrackMetrics(x, z) {
       nx = -1; nz = 0;
     }
   } else if (z > L) {
-    // Curva Norte (Superior)
     const dx = x;
     const dz = z - L;
     const d = Math.hypot(dx, dz) || 0.0001;
-    nx = dx / d;
-    nz = dz / d;
-    cx = nx * R;
-    cz = L + nz * R;
+    nx = dx / d; nz = dz / d;
+    cx = nx * R; cz = L + nz * R;
     distFromCenter = d - R;
   } else {
-    // Curva Sul (Inferior)
     const dx = x;
     const dz = z + L;
     const d = Math.hypot(dx, dz) || 0.0001;
-    nx = dx / d;
-    nz = dz / d;
-    cx = nx * R;
-    cz = -L + nz * R;
+    nx = dx / d; nz = dz / d;
+    cx = nx * R; cz = -L + nz * R;
     distFromCenter = d - R;
   }
 
-  // Cálculo do progresso da volta (0.0 a 1.0) no sentido anti-horário
-  const straightLen = TRACK.straightLength;
+  const straightLen = trackConfig.straightLength;
   const curveLen = Math.PI * R;
   const totalLen = 2 * straightLen + 2 * curveLen;
   let s = 0;
 
   if (x >= 0 && z >= -L && z <= L) {
-    // Reta Direita (Principal - Sentido Norte: z vai de -L para +L)
     s = z - (-L);
   } else if (z > L) {
-    // Curva Norte (Ângulo vai de 0 até PI)
     const angle = Math.atan2(z - L, x);
     s = straightLen + angle * R;
   } else if (x < 0 && z >= -L && z <= L) {
-    // Reta Esquerda (Oposta - Sentido Sul: z vai de +L para -L)
     s = straightLen + curveLen + (L - z);
   } else {
-    // Curva Sul (Ângulo vai de PI até 2*PI)
     const angle = Math.atan2(-(z + L), -x);
     s = 2 * straightLen + curveLen + angle * R;
   }
 
-  // Compensa para que a linha de chegada fique no meio da reta direita (z = 0)
   const startOffset = L;
   let progress = (s - startOffset) / totalLen;
   if (progress < 0) progress += 1;
@@ -82,14 +104,10 @@ export function getTrackMetrics(x, z) {
   return { cx, cz, nx, nz, distFromCenter, progress, totalLen };
 }
 
-/**
- * Retorna a coordenada (x, z) e a orientação (heading) a partir de um progresso (0..1)
- * e um deslocamento lateral (lateralOffset). Usado para posicionar o Grid de Largada e a Malha 3D.
- */
-export function getPointAtProgress(progress, lateralOffset = 0) {
-  const L = TRACK.straightLength / 2;
-  const R = TRACK.radius;
-  const straightLen = TRACK.straightLength;
+export function getPointAtProgress(progress, lateralOffset = 0, trackConfig = TRACKS.OVAL) {
+  const L = trackConfig.straightLength / 2;
+  const R = trackConfig.radius;
+  const straightLen = trackConfig.straightLength;
   const curveLen = Math.PI * R;
   const totalLen = 2 * straightLen + 2 * curveLen;
 
@@ -99,40 +117,28 @@ export function getPointAtProgress(progress, lateralOffset = 0) {
   let cx = 0, cz = 0, nx = 0, nz = 0, tx = 0, tz = 0;
 
   if (s <= straightLen) {
-    cx = R;
-    cz = -L + s;
-    nx = 1; nz = 0;
-    tx = 0; tz = 1;
+    cx = R; cz = -L + s;
+    nx = 1; nz = 0; tx = 0; tz = 1;
   } else if (s <= straightLen + curveLen) {
     const angle = (s - straightLen) / R;
-    nx = Math.cos(angle);
-    nz = Math.sin(angle);
-    cx = nx * R;
-    cz = L + nz * R;
-    tx = -Math.sin(angle);
-    tz = Math.cos(angle);
+    nx = Math.cos(angle); nz = Math.sin(angle);
+    cx = nx * R; cz = L + nz * R;
+    tx = -Math.sin(angle); tz = Math.cos(angle);
   } else if (s <= 2 * straightLen + curveLen) {
     const d = s - (straightLen + curveLen);
-    cx = -R;
-    cz = L - d;
-    nx = -1; nz = 0;
-    tx = 0; tz = -1;
+    cx = -R; cz = L - d;
+    nx = -1; nz = 0; tx = 0; tz = -1;
   } else {
     const angle = (s - (2 * straightLen + curveLen)) / R;
-    nx = -Math.cos(angle);
-    nz = -Math.sin(angle);
-    cx = nx * R;
-    cz = -L + nz * R;
-    tx = Math.sin(angle);
-    tz = -Math.cos(angle);
+    nx = -Math.cos(angle); nz = -Math.sin(angle);
+    cx = nx * R; cz = -L + nz * R;
+    tx = Math.sin(angle); tz = -Math.cos(angle);
   }
 
-  const heading = Math.atan2(tx, tz);
   return {
     x: cx + nx * lateralOffset,
     z: cz + nz * lateralOffset,
-    heading,
-    nx,
-    nz
+    heading: Math.atan2(tx, tz),
+    nx, nz
   };
 }

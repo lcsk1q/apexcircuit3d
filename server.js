@@ -1,9 +1,10 @@
+//server.js
 import express from 'express';
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TRACK, getTrackMetrics, getPointAtProgress } from './shared/track.js';
+import { TRACKS, CAR_TYPES, getTrackMetrics, getPointAtProgress } from './shared/track.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,21 +13,15 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Servir arquivos estáticos e geometria compartilhada
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/shared', express.static(path.join(__dirname, 'shared')));
 
-// Healthcheck endpoint para Cloud Run / AI Studio
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok', rooms: rooms.size }));
 
-const CAR_COLORS = [
-  '#ef4444', '#3b82f6', '#10b981', '#f59e0b',
-  '#8b5cf6', '#ec4899', '#06b6d4', '#eab308'
-];
+const rooms = new Map();
+const sessions = new Map();
 
-// Estado em memória do servidor
-const rooms = new Map();    // roomId -> Room
-const sessions = new Map(); // token -> Session
+const POWER_TYPES = ['TURBO', 'SHIELD', 'EMP', 'OIL'];
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -39,19 +34,44 @@ function generateRoomCode() {
 }
 
 class Room {
-  constructor({ name, maxPlayers = 6, isPrivate = false, allowMidRaceJoin = false, hostToken }) {
+  constructor({ name, maxPlayers = 6, isPrivate = false, allowMidRaceJoin = false, trackId = 'OVAL', hostToken }) {
     this.id = generateRoomCode();
     this.name = (name || `Sala #${this.id}`).slice(0, 28);
     this.maxPlayers = Math.min(Math.max(Number(maxPlayers) || 6, 2), 8);
     this.isPrivate = Boolean(isPrivate);
     this.allowMidRaceJoin = Boolean(allowMidRaceJoin);
+    this.trackConfig = TRACKS[trackId] || TRACKS.OVAL;
     this.hostToken = hostToken;
-    this.state = 'LOBBY'; // 'LOBBY' | 'COUNTDOWN' | 'RACING' | 'FINISHED'
-    this.players = new Map(); // token -> PlayerState
+    this.state = 'LOBBY';
+    this.players = new Map();
+    this.itemBoxes = [];
+    this.coins = [];
+    this.oilTraps = [];
     this.countdownEnd = 0;
     this.raceStartTime = 0;
     this.raceEndTime = 0;
     this.emptySince = null;
+  }
+
+  initPickups() {
+    this.itemBoxes = [];
+    this.coins = [];
+    this.oilTraps = [];
+
+    // Gerar 8 Caixas de Itens ao longo da pista
+    for (let i = 0; i < 8; i++) {
+      const prog = (i / 8) + 0.05;
+      const pt = getPointAtProgress(prog, (i % 2 === 0 ? -3 : 3), this.trackConfig);
+      this.itemBoxes.push({ id: i, x: pt.x, z: pt.z, active: true, respawnTimer: 0 });
+    }
+
+    // Gerar 16 Moedas
+    for (let i = 0; i < 16; i++) {
+      const prog = (i / 16);
+      const lateral = Math.sin(i * 1.5) * 5;
+      const pt = getPointAtProgress(prog, lateral, this.trackConfig);
+      this.coins.push({ id: i, x: pt.x, z: pt.z, active: true, respawnTimer: 0 });
+    }
   }
 
   addPlayer(session) {
@@ -72,9 +92,7 @@ class Room {
       return { ok: true, player: p, reconnected: true };
     }
 
-    const usedColors = new Set(Array.from(this.players.values()).map(p => p.color));
-    const color = CAR_COLORS.find(c => !usedColors.has(c)) || CAR_COLORS[this.players.size % CAR_COLORS.length];
-
+    const carType = CAR_TYPES[this.players.size % CAR_TYPES.length];
     const slotIndex = this.players.size;
     const spawn = this.getGridPosition(slotIndex);
 
@@ -82,14 +100,14 @@ class Room {
       id: session.id,
       token: session.token,
       name: session.name,
-      color,
+      carType: carType.id,
+      color: carType.color,
       ready: false,
       connected: true,
       disconnectedAt: null,
       x: spawn.x,
       z: spawn.z,
-      vx: 0,
-      vz: 0,
+      vx: 0, vz: 0,
       speed: 0,
       heading: spawn.heading,
       inputs: { up: false, down: false, left: false, right: false },
@@ -99,7 +117,13 @@ class Room {
       totalProgress: 0,
       finished: false,
       finishTimeMs: null,
-      position: slotIndex + 1
+      position: slotIndex + 1,
+      // Status e Poderes
+      coinsCollected: 0,
+      power: null,
+      shieldActive: false,
+      boostTimer: 0,
+      spinTimer: 0
     };
 
     this.players.set(session.token, player);
@@ -115,7 +139,7 @@ class Room {
     const col = index % 2;
     const lateral = col === 0 ? -3.6 : 3.6;
     const progress = (1 - 0.018 - row * 0.022 + 1) % 1;
-    const pt = getPointAtProgress(progress, lateral);
+    const pt = getPointAtProgress(progress, lateral, this.trackConfig);
     return { x: pt.x, z: pt.z, heading: pt.heading, progress };
   }
 
@@ -136,15 +160,13 @@ class Room {
     this.state = 'COUNTDOWN';
     this.countdownEnd = Date.now() + 3500;
     this.raceStartTime = 0;
+    this.initPickups();
 
     let idx = 0;
     for (const p of this.players.values()) {
       const spawn = this.getGridPosition(idx++);
-      p.x = spawn.x;
-      p.z = spawn.z;
-      p.vx = 0;
-      p.vz = 0;
-      p.speed = 0;
+      p.x = spawn.x; p.z = spawn.z;
+      p.vx = 0; p.vz = 0; p.speed = 0;
       p.heading = spawn.heading;
       p.lap = 1;
       p.highestCheckpoint = 0;
@@ -154,6 +176,11 @@ class Room {
       p.finishTimeMs = null;
       p.position = idx;
       p.inputs = { up: false, down: false, left: false, right: false };
+      p.coinsCollected = 0;
+      p.power = null;
+      p.shieldActive = false;
+      p.boostTimer = 0;
+      p.spinTimer = 0;
     }
     this.broadcastRoomState();
   }
@@ -166,10 +193,41 @@ class Room {
     }
   }
 
+  usePower(token) {
+    const p = this.players.get(token);
+    if (!p || !p.power || p.finished || this.state !== 'RACING') return;
+
+    const currentPower = p.power;
+    p.power = null;
+
+    if (currentPower === 'TURBO') {
+      p.boostTimer = 2.5;
+    } else if (currentPower === 'SHIELD') {
+      p.shieldActive = true;
+      setTimeout(() => { p.shieldActive = false; }, 6000);
+    } else if (currentPower === 'EMP') {
+      for (const other of this.players.values()) {
+        if (other.id !== p.id && !other.shieldActive) {
+          other.spinTimer = 1.2;
+          other.vx *= 0.2;
+          other.vz *= 0.2;
+        }
+      }
+    } else if (currentPower === 'OIL') {
+      const dropOffset = -2.5;
+      this.oilTraps.push({
+        id: Date.now() + Math.random(),
+        x: p.x - Math.sin(p.heading) * dropOffset,
+        z: p.z - Math.cos(p.heading) * dropOffset
+      });
+    }
+
+    this.broadcastRoomState();
+  }
+
   update(dt) {
     const now = Date.now();
 
-    // Limpeza de jogadores que caíram há mais de 20 segundos
     for (const [token, p] of this.players.entries()) {
       if (!p.connected && p.disconnectedAt && now - p.disconnectedAt > 20000) {
         const s = sessions.get(token);
@@ -197,11 +255,12 @@ class Room {
 
     if (this.state === 'RACING') {
       this.stepPhysics(dt, now);
+      this.updatePickups(dt);
 
       const active = Array.from(this.players.values()).filter(p => p.connected);
       const anyFinished = Array.from(this.players.values()).some(p => p.finished);
       const allFinished = active.length > 0 && active.every(p => p.finished);
-      const timedOut = now - this.raceStartTime > 180000; // Tempo máximo de 3 minutos
+      const timedOut = now - this.raceStartTime > 240000;
 
       if (!this.firstFinishTime && anyFinished) {
         this.firstFinishTime = now;
@@ -220,7 +279,6 @@ class Room {
     }
 
     if (this.state === 'FINISHED') {
-      // Volta automaticamente ao Lobby após 10 segundos na tela de pódio
       if (now - this.raceEndTime > 10000) {
         this.state = 'LOBBY';
         this.broadcastRoomState();
@@ -229,10 +287,27 @@ class Room {
     }
   }
 
+  updatePickups(dt) {
+    // Respawn de caixas de itens
+    for (const box of this.itemBoxes) {
+      if (!box.active) {
+        box.respawnTimer -= dt;
+        if (box.respawnTimer <= 0) box.active = true;
+      }
+    }
+    // Respawn de moedas
+    for (const coin of this.coins) {
+      if (!coin.active) {
+        coin.respawnTimer -= dt;
+        if (coin.respawnTimer <= 0) coin.active = true;
+      }
+    }
+  }
+
   stepPhysics(dt, now) {
-    const ACCEL = 32;
+    let ACCEL = 32;
     const BRAKE = 40;
-    const MAX_SPEED = 45;
+    let MAX_SPEED = 45;
     const MAX_REV = -14;
     const TURN_SPEED = 2.45;
     const LATERAL_GRIP = 8.5;
@@ -241,7 +316,18 @@ class Room {
     const list = Array.from(this.players.values());
 
     for (const p of list) {
-      const inp = (!p.connected || p.finished)
+      if (p.boostTimer > 0) {
+        p.boostTimer -= dt;
+        ACCEL = 65;
+        MAX_SPEED = 70;
+      }
+
+      if (p.spinTimer > 0) {
+        p.spinTimer -= dt;
+        p.heading += 12 * dt;
+      }
+
+      const inp = (!p.connected || p.finished || p.spinTimer > 0)
         ? { up: false, down: false, left: false, right: false }
         : p.inputs;
 
@@ -263,8 +349,7 @@ class Room {
       if (!inp.up && !inp.down && Math.abs(forwardSpeed) < 0.4) forwardSpeed = 0;
       forwardSpeed = Math.max(MAX_REV, Math.min(MAX_SPEED, forwardSpeed));
 
-      // Direção proporcional ao movimento
-      if (Math.abs(forwardSpeed) > 0.3) {
+      if (Math.abs(forwardSpeed) > 0.3 && p.spinTimer <= 0) {
         const dir = forwardSpeed >= 0 ? 1 : -1;
         const speedFactor = Math.min(1, Math.abs(forwardSpeed) / 9);
         const highSpeedDamp = 1 - 0.25 * (Math.abs(forwardSpeed) / MAX_SPEED);
@@ -272,11 +357,9 @@ class Room {
         if (inp.left) steer += 1;
         if (inp.right) steer -= 1;
         p.heading += steer * TURN_SPEED * speedFactor * highSpeedDamp * dir * dt;
-        // Normalizar ângulo entre -PI e +PI
         p.heading = Math.atan2(Math.sin(p.heading), Math.cos(p.heading));
       }
 
-      // Reduzir derrapagem lateral (Grip arcade)
       lateralSpeed *= Math.max(0, 1 - LATERAL_GRIP * dt);
 
       const nfx = Math.sin(p.heading);
@@ -290,9 +373,9 @@ class Room {
       p.x += p.vx * dt;
       p.z += p.vz * dt;
 
-      // Colisão com as paredes da pista
-      const metrics = getTrackMetrics(p.x, p.z);
-      const maxOffset = (TRACK.width / 2) - TRACK.carRadius;
+      // Colisão Paredes
+      const metrics = getTrackMetrics(p.x, p.z, this.trackConfig);
+      const maxOffset = (this.trackConfig.width / 2) - this.trackConfig.carRadius;
 
       if (Math.abs(metrics.distFromCenter) > maxOffset) {
         const sign = Math.sign(metrics.distFromCenter);
@@ -300,31 +383,60 @@ class Room {
         p.z = metrics.cz + metrics.nz * sign * maxOffset;
 
         const vn = p.vx * metrics.nx + p.vz * metrics.nz;
-        if ( vn * sign > 0 ) {
+        if (vn * sign > 0) {
           p.vx -= 1.3 * vn * metrics.nx;
           p.vz -= 1.3 * vn * metrics.nz;
         }
-        p.vx *= 0.88;
-        p.vz *= 0.88;
+        p.vx *= 0.88; p.vz *= 0.88;
       }
 
       p.speed = Math.hypot(p.vx, p.vz) * (forwardSpeed >= 0 ? 1 : -1);
 
-      // Verificação de Checkpoints e Voltas
+      // Coleta Caixas de Item
+      for (const box of this.itemBoxes) {
+        if (box.active && Math.hypot(p.x - box.x, p.z - box.z) < 2.5) {
+          box.active = false;
+          box.respawnTimer = 8;
+          if (!p.power) {
+            p.power = POWER_TYPES[Math.floor(Math.random() * POWER_TYPES.length)];
+          }
+        }
+      }
+
+      // Coleta Moedas
+      for (const coin of this.coins) {
+        if (coin.active && Math.hypot(p.x - coin.x, p.z - coin.z) < 2.0) {
+          coin.active = false;
+          coin.respawnTimer = 10;
+          p.coinsCollected += 1;
+        }
+      }
+
+      // Colisão com Armadilhas de Óleo
+      for (let i = this.oilTraps.length - 1; i >= 0; i--) {
+        const trap = this.oilTraps[i];
+        if (Math.hypot(p.x - trap.x, p.z - trap.z) < 2.2) {
+          if (!p.shieldActive) {
+            p.spinTimer = 1.4;
+          }
+          this.oilTraps.splice(i, 1);
+        }
+      }
+
+      // Lap Checkpoints
       if (!p.finished) {
         const prog = metrics.progress;
-        const sector = Math.min(3, Math.floor(prog * 4)); // 4 setores: 0, 1, 2, 3
+        const sector = Math.min(3, Math.floor(prog * 4));
 
         if (sector === p.highestCheckpoint + 1) {
           p.highestCheckpoint = sector;
         }
 
-        // Cruzou a linha de chegada (de >0.75 para <0.25) tendo passado pelos checkpoints
         if (p.lastProgress > 0.75 && prog < 0.25 && p.highestCheckpoint >= 2) {
           p.lap += 1;
           p.highestCheckpoint = 0;
-          if (p.lap > TRACK.totalLaps) {
-            p.lap = TRACK.totalLaps;
+          if (p.lap > this.trackConfig.totalLaps) {
+            p.lap = this.trackConfig.totalLaps;
             p.finished = true;
             p.finishTimeMs = now - this.raceStartTime;
           }
@@ -334,43 +446,26 @@ class Room {
         const effectiveProg = (p.highestCheckpoint === 0 && prog > 0.75) ? (prog - 1) : prog;
         p.totalProgress = (p.lap - 1) + effectiveProg;
       } else {
-        p.totalProgress = TRACK.totalLaps + 10 - (p.finishTimeMs / 1000000);
+        p.totalProgress = this.trackConfig.totalLaps + 10 - (p.finishTimeMs / 1000000);
       }
     }
 
-    // Colisão Carro-com-Carro
-    const minDist = TRACK.carRadius * 2;
+    // Colisão Carro-Carro
+    const minDist = this.trackConfig.carRadius * 2;
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = list[i];
-        const b = list[j];
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
+        const a = list[i]; const b = list[j];
+        const dx = b.x - a.x; const dz = b.z - a.z;
         const dist = Math.hypot(dx, dz);
         if (dist > 0 && dist < minDist) {
           const overlap = (minDist - dist) * 0.5;
-          const nx = dx / dist;
-          const nz = dz / dist;
-          a.x -= nx * overlap;
-          a.z -= nz * overlap;
-          b.x += nx * overlap;
-          b.z += nz * overlap;
-
-          const rvx = b.vx - a.vx;
-          const rvz = b.vz - a.vz;
-          const sepVel = rvx * nx + rvz * nz;
-          if (sepVel < 0) {
-            const impulse = -0.85 * sepVel;
-            a.vx -= impulse * nx * 0.5;
-            a.vz -= impulse * nz * 0.5;
-            b.vx += impulse * nx * 0.5;
-            b.vz += impulse * nz * 0.5;
-          }
+          const nx = dx / dist; const nz = dz / dist;
+          a.x -= nx * overlap; a.z -= nz * overlap;
+          b.x += nx * overlap; b.z += nz * overlap;
         }
       }
     }
 
-    // Ordenação de posições da corrida
     const sorted = [...list].sort((a, b) => {
       if (a.finished && b.finished) return a.finishTimeMs - b.finishTimeMs;
       if (a.finished) return -1;
@@ -390,13 +485,15 @@ class Room {
         isPrivate: this.isPrivate,
         maxPlayers: this.maxPlayers,
         allowMidRaceJoin: this.allowMidRaceJoin,
+        trackId: this.trackConfig.id,
         state: this.state,
         hostId: hostPlayer ? hostPlayer.id : null,
         countdownMs: this.state === 'COUNTDOWN' ? Math.max(0, this.countdownEnd - Date.now()) : 0,
-        totalLaps: TRACK.totalLaps,
+        totalLaps: this.trackConfig.totalLaps,
         players: Array.from(this.players.values()).map(p => ({
           id: p.id,
           name: p.name,
+          carType: p.carType,
           color: p.color,
           ready: p.ready,
           connected: p.connected,
@@ -404,6 +501,9 @@ class Room {
           lap: p.lap,
           finished: p.finished,
           finishTimeMs: p.finishTimeMs,
+          coinsCollected: p.coinsCollected,
+          power: p.power,
+          shieldActive: p.shieldActive,
           x: Number(p.x.toFixed(2)),
           z: Number(p.z.toFixed(2)),
           heading: Number(p.heading.toFixed(3)),
@@ -420,6 +520,9 @@ class Room {
       state: this.state,
       countdownMs: this.state === 'COUNTDOWN' ? Math.max(0, this.countdownEnd - Date.now()) : 0,
       raceElapsedMs: this.state === 'RACING' ? (Date.now() - this.raceStartTime) : 0,
+      itemBoxes: this.itemBoxes.map(b => ({ id: b.id, active: b.active })),
+      coins: this.coins.map(c => ({ id: c.id, active: c.active })),
+      oilTraps: this.oilTraps,
       cars: Array.from(this.players.values()).map(p => ({
         id: p.id,
         x: Number(p.x.toFixed(2)),
@@ -429,7 +532,10 @@ class Room {
         lap: p.lap,
         pos: p.position,
         fin: p.finished,
-        ft: p.finishTimeMs
+        ft: p.finishTimeMs,
+        coins: p.coinsCollected,
+        power: p.power,
+        shield: p.shieldActive
       }))
     };
   }
@@ -438,9 +544,7 @@ class Room {
     const payload = JSON.stringify(this.serializeRoomState());
     for (const token of this.players.keys()) {
       const s = sessions.get(token);
-      if (s && s.ws && s.ws.readyState === 1) {
-        s.ws.send(payload);
-      }
+      if (s && s.ws && s.ws.readyState === 1) s.ws.send(payload);
     }
   }
 
@@ -448,9 +552,7 @@ class Room {
     const payload = JSON.stringify(this.serializeTelemetry());
     for (const token of this.players.keys()) {
       const s = sessions.get(token);
-      if (s && s.ws && s.ws.readyState === 1) {
-        s.ws.send(payload);
-      }
+      if (s && s.ws && s.ws.readyState === 1) s.ws.send(payload);
     }
   }
 }
@@ -462,6 +564,7 @@ function getPublicRoomsPayload() {
       list.push({
         id: r.id,
         name: r.name,
+        trackId: r.trackConfig.id,
         playersCount: r.players.size,
         maxPlayers: r.maxPlayers,
         state: r.state,
@@ -475,9 +578,7 @@ function getPublicRoomsPayload() {
 function broadcastRoomListToLobby() {
   const payload = JSON.stringify(getPublicRoomsPayload());
   for (const s of sessions.values()) {
-    if (!s.roomId && s.ws && s.ws.readyState === 1) {
-      s.ws.send(payload);
-    }
+    if (!s.roomId && s.ws && s.ws.readyState === 1) s.ws.send(payload);
   }
 }
 
@@ -487,11 +588,8 @@ function handleLeaveCurrentRoom(session) {
   session.roomId = null;
   if (room) {
     room.removePlayer(session.token);
-    if (room.players.size === 0) {
-      rooms.delete(room.id);
-    } else {
-      room.broadcastRoomState();
-    }
+    if (room.players.size === 0) rooms.delete(room.id);
+    else room.broadcastRoomState();
     broadcastRoomListToLobby();
   }
 }
@@ -501,15 +599,9 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (raw) => {
     let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg.type !== 'string') return;
 
-    // 1. Autenticação de Sessão e Reconexão Automática
     if (msg.type === 'hello') {
       const token = (typeof msg.token === 'string' && msg.token.length >= 8)
         ? msg.token.slice(0, 64)
@@ -544,7 +636,6 @@ wss.on('connection', (ws) => {
         name: currentSession.name
       }));
 
-      // Verifica se o jogador estava em uma sala antes de cair a conexão
       if (currentSession.roomId && rooms.has(currentSession.roomId)) {
         const room = rooms.get(currentSession.roomId);
         const res = room.addPlayer(currentSession);
@@ -563,77 +654,27 @@ wss.on('connection', (ws) => {
     if (!currentSession) return;
 
     switch (msg.type) {
-      case 'set_name': {
-        if (typeof msg.name === 'string' && msg.name.trim()) {
-          currentSession.name = msg.name.trim().slice(0, 16);
-          if (currentSession.roomId && rooms.has(currentSession.roomId)) {
-            const room = rooms.get(currentSession.roomId);
-            const p = room.players.get(currentSession.token);
-            if (p) {
-              p.name = currentSession.name;
-              room.broadcastRoomState();
-            }
+      case 'set_car': {
+        const room = rooms.get(currentSession.roomId);
+        if (room && room.state === 'LOBBY') {
+          const p = room.players.get(currentSession.token);
+          if (p && CAR_TYPES.some(c => c.id === msg.carType)) {
+            p.carType = msg.carType;
+            p.color = CAR_TYPES.find(c => c.id === msg.carType).color;
+            room.broadcastRoomState();
           }
-        }
-        break;
-      }
-
-      case 'get_rooms': {
-        ws.send(JSON.stringify(getPublicRoomsPayload()));
-        break;
-      }
-
-      case 'quick_play': {
-        if (typeof msg.name === 'string' && msg.name.trim()) {
-          currentSession.name = msg.name.trim().slice(0, 16);
-        }
-        handleLeaveCurrentRoom(currentSession);
-
-        // Procura uma sala pública no LOBBY com vaga ou que aceite entrada em andamento
-        let targetRoom = null;
-        for (const r of rooms.values()) {
-          if (!r.isPrivate && r.players.size < r.maxPlayers) {
-            if (r.state === 'LOBBY' || r.allowMidRaceJoin) {
-              targetRoom = r;
-              break;
-            }
-          }
-        }
-
-        // Se todas estiverem cheias ou em corrida fechada, cria uma nova sala automaticamente
-        if (!targetRoom) {
-          targetRoom = new Room({
-            name: `GP Público #${Math.floor(100 + Math.random() * 900)}`,
-            maxPlayers: 6,
-            isPrivate: false,
-            allowMidRaceJoin: false,
-            hostToken: currentSession.token
-          });
-          rooms.set(targetRoom.id, targetRoom);
-        }
-
-        const res = targetRoom.addPlayer(currentSession);
-        if (res.ok) {
-          currentSession.roomId = targetRoom.id;
-          targetRoom.broadcastRoomState();
-          broadcastRoomListToLobby();
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: res.reason }));
         }
         break;
       }
 
       case 'create_room': {
-        if (typeof msg.playerName === 'string' && msg.playerName.trim()) {
-          currentSession.name = msg.playerName.trim().slice(0, 16);
-        }
         handleLeaveCurrentRoom(currentSession);
-
         const room = new Room({
           name: msg.roomName,
           maxPlayers: msg.maxPlayers,
           isPrivate: msg.isPrivate,
           allowMidRaceJoin: msg.allowMidRaceJoin,
+          trackId: msg.trackId || 'OVAL',
           hostToken: currentSession.token
         });
         rooms.set(room.id, room);
@@ -646,24 +687,48 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'join_room': {
-        if (typeof msg.playerName === 'string' && msg.playerName.trim()) {
-          currentSession.name = msg.playerName.trim().slice(0, 16);
+      case 'use_power': {
+        const room = rooms.get(currentSession.roomId);
+        if (room) room.usePower(currentSession.token);
+        break;
+      }
+
+      case 'quick_play': {
+        handleLeaveCurrentRoom(currentSession);
+        let targetRoom = null;
+        for (const r of rooms.values()) {
+          if (!r.isPrivate && r.players.size < r.maxPlayers) {
+            if (r.state === 'LOBBY' || r.allowMidRaceJoin) {
+              targetRoom = r;
+              break;
+            }
+          }
         }
+        if (!targetRoom) {
+          targetRoom = new Room({
+            name: `GP Público #${Math.floor(100 + Math.random() * 900)}`,
+            maxPlayers: 6,
+            trackId: 'OVAL',
+            hostToken: currentSession.token
+          });
+          rooms.set(targetRoom.id, targetRoom);
+        }
+        const res = targetRoom.addPlayer(currentSession);
+        if (res.ok) {
+          currentSession.roomId = targetRoom.id;
+          targetRoom.broadcastRoomState();
+          broadcastRoomListToLobby();
+        }
+        break;
+      }
+
+      case 'join_room': {
         const code = String(msg.roomId || '').trim().toUpperCase();
         const room = rooms.get(code);
-        if (!room) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Sala não encontrada ou encerrada.' }));
-          return;
-        }
-        if (currentSession.roomId && currentSession.roomId !== room.id) {
-          handleLeaveCurrentRoom(currentSession);
-        }
+        if (!room) return ws.send(JSON.stringify({ type: 'error', message: 'Sala não encontrada.' }));
+        handleLeaveCurrentRoom(currentSession);
         const res = room.addPlayer(currentSession);
-        if (!res.ok) {
-          ws.send(JSON.stringify({ type: 'error', message: res.reason }));
-          return;
-        }
+        if (!res.ok) return ws.send(JSON.stringify({ type: 'error', message: res.reason }));
         currentSession.roomId = room.id;
         room.broadcastRoomState();
         broadcastRoomListToLobby();
@@ -685,20 +750,14 @@ wss.on('connection', (ws) => {
         p.ready = !p.ready;
         room.broadcastRoomState();
         room.checkAutoStart();
-        broadcastRoomListToLobby();
         break;
       }
 
       case 'start_race': {
         const room = rooms.get(currentSession.roomId);
-        if (!room) return;
-        if (room.hostToken !== currentSession.token) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Apenas o anfitrião pode iniciar a corrida.' }));
-          return;
-        }
+        if (!room || room.hostToken !== currentSession.token) return;
         if (room.state === 'LOBBY' || room.state === 'FINISHED') {
           room.resetForCountdown();
-          broadcastRoomListToLobby();
         }
         break;
       }
@@ -727,14 +786,12 @@ wss.on('connection', (ws) => {
       if (p) {
         p.connected = false;
         p.disconnectedAt = Date.now();
-        p.inputs = { up: false, down: false, left: false, right: false };
         room.broadcastRoomState();
       }
     }
   });
 });
 
-// Loop Autoritativo de Física e Limpeza de Salas (30 Hz)
 const TICK_RATE = 30;
 let lastTick = Date.now();
 
@@ -745,12 +802,9 @@ setInterval(() => {
 
   for (const [id, room] of rooms.entries()) {
     room.update(dt);
-
     if (room.state === 'COUNTDOWN' || room.state === 'RACING') {
       room.broadcastTelemetry();
     }
-
-    // Limpa salas vazias após 15 segundos
     if (room.players.size === 0 && room.emptySince && now - room.emptySince > 15000) {
       rooms.delete(id);
       broadcastRoomListToLobby();
@@ -760,5 +814,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor Multiplayer rodando na porta ${PORT}`);
+  console.log(`Servidor de Corrida Multiplayer rodando na porta ${PORT}`);
 });
