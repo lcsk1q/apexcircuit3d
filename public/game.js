@@ -55,7 +55,7 @@ const CAR_TYPES = [
     handling: 3.2, 
     desc: 'O carro definitivo do circuito.', 
     color: '#10b981', 
-    scale: 1 
+    scale: 1.5 
   }
 ];
 
