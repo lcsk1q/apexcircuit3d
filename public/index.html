@@ -35,6 +35,7 @@ label input { margin:0; }
   #wallet { color:#f59e0b; font-weight:bold; text-shadow:0 0 8px rgba(245,158,11,.6); }
   #garage { top:56px; right:12px; width:min(300px, calc(100% - 24px)); }
   #garage.open { display:block; }
+  #garageInfo { margin-top:10px; padding-top:10px; border-top:1px solid rgba(0,255,136,.2); font-size:13px; min-height:140px; }
   .car-button { display:block; width:100%; text-align:left; padding:7px 9px; margin:4px 0; font-size:12px; }
   .car-button.selected { background:rgba(0,255,136,.4); font-weight:bold; } .car-button.locked { border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,.08); }
 
@@ -64,7 +65,7 @@ label input { margin:0; }
 <canvas id="canvas"></canvas>
 
 <div id="topbar">💰 <span id="wallet"><span id="walletCoins">0</span></span><button id="garageBtn">🚗 Garagem</button></div>
-<div id="garage" class="panel"><h2>🚗 GARAGEM</h2><div id="carList"></div></div>
+<div id="garage" class="panel"><h2>🚗 GARAGEM</h2><div id="carList"></div><div id="garageInfo"></div></div>
 
 <div id="menu" class="panel">
   <h2>🏁 APEX CIRCUIT</h2>

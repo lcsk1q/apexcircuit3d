@@ -1,9 +1,9 @@
 // shared/carData.js
-// Database com 16 carros com especificacoes unicas e modelos car1.glb a car10.glb
-// (car11-car16 reaproveitam modelos 1-6 ate novos arquivos serem adicionados).
+// Database com 10 carros (modelos car1.glb a car10.glb na pasta public/models/)
+// Cada carro tem seu modelo exclusivo, escalado proporcionalmente pelo cliente.
 
 export const CARS_DATABASE = [
-  // TIER 1 - Carros iniciais (Gratuitos)
+  // TIER 1 - Carro inicial (Gratuito)
   {
     id: 'car_01_civic',
     name: 'Honda Civic',
@@ -22,7 +22,7 @@ export const CARS_DATABASE = [
     year: 2023
   },
 
-  // TIER 2 - Carros intermediarios
+  // TIER 2 - Carros intermediários
   {
     id: 'car_02_mustang',
     name: 'Ford Mustang GT',
@@ -30,12 +30,13 @@ export const CARS_DATABASE = [
     price: 250,
     modelPath: '/models/car2.glb',
     modelScale: 1.0,
+    modelRotationY: Math.PI, // modelo virado de costas
     topSpeed: 52,
     acceleration: 42,
     handling: 2.3,
     braking: 2.4,
     weight: 1.5,
-    description: 'Muscle car classico com potencia bruta em retas.',
+    description: 'Muscle car clássico com potência bruta em retas.',
     color: '#ef4444',
     brand: 'Ford',
     year: 2022
@@ -71,13 +72,13 @@ export const CARS_DATABASE = [
     handling: 3.0,
     braking: 2.8,
     weight: 1.3,
-    description: 'Lendaria maquina japonesa com aceleracao devastadora.',
+    description: 'Lendária máquina japonesa com aceleração devastadora.',
     color: '#10b981',
     brand: 'Nissan',
     year: 2023
   },
 
-  // TIER 3 - Carros desportivos avancados
+  // TIER 3 - Carros esportivos avançados
   {
     id: 'car_05_corvette',
     name: 'Chevrolet Corvette C8',
@@ -90,7 +91,7 @@ export const CARS_DATABASE = [
     handling: 3.1,
     braking: 2.9,
     weight: 1.2,
-    description: 'Super desportivo americano de motor central. Velocidade pura.',
+    description: 'Super esportivo americano de motor central. Velocidade pura.',
     color: '#fbbf24',
     brand: 'Chevrolet',
     year: 2023
@@ -98,17 +99,18 @@ export const CARS_DATABASE = [
 
   {
     id: 'car_06_lamborghini',
-    name: 'Lamborghini Huracan',
+    name: 'Lamborghini Huracán',
     tier: 3,
     price: 650,
     modelPath: '/models/car6.glb',
     modelScale: 1.0,
+    modelRotationY: Math.PI, // modelo virado de costas
     topSpeed: 62,
     acceleration: 52,
     handling: 3.2,
     braking: 3.0,
     weight: 1.1,
-    description: 'Supercar italiano com design futurista e potencia brutal.',
+    description: 'Supercarro italiano com design futurista e potência brutal.',
     color: '#fbbf24',
     brand: 'Lamborghini',
     year: 2022
@@ -126,7 +128,7 @@ export const CARS_DATABASE = [
     handling: 3.3,
     braking: 3.1,
     weight: 1.15,
-    description: 'Icone de velocidade e precisao. O sonho de todo piloto.',
+    description: 'Ícone de velocidade e precisão. O sonho de todo piloto.',
     color: '#dc2626',
     brand: 'Ferrari',
     year: 2023
@@ -144,13 +146,13 @@ export const CARS_DATABASE = [
     handling: 3.4,
     braking: 3.2,
     weight: 1.25,
-    description: 'Classico moderno com melhor manejo de todos os supercarros.',
+    description: 'Clássico moderno com melhor manejo de todos os supercarros.',
     color: '#fbbf24',
     brand: 'Porsche',
     year: 2023
   },
 
-  // TIER 4 - Carros lendarios e ultra-rapidos
+  // TIER 4 - Carros lendários e ultra-rápidos
   {
     id: 'car_09_bugatti',
     name: 'Bugatti Chiron',
@@ -163,7 +165,7 @@ export const CARS_DATABASE = [
     handling: 2.8,
     braking: 3.0,
     weight: 1.6,
-    description: 'Hipercarro frances. Pura velocidade em forma de arte.',
+    description: 'Hipercarro francês. Pura velocidade em forma de arte.',
     color: '#000000',
     brand: 'Bugatti',
     year: 2023
@@ -181,129 +183,20 @@ export const CARS_DATABASE = [
     handling: 3.5,
     braking: 3.3,
     weight: 1.05,
-    description: 'Obra de arte italiana com precisao de cirurgiao.',
+    description: 'Obra de arte italiana com precisão de cirurgião.',
     color: '#8b5a3c',
     brand: 'Pagani',
     year: 2022
-  },
-
-  {
-    id: 'car_11_koenigsegg',
-    name: 'Koenigsegg Jesko',
-    tier: 4,
-    price: 1300,
-    modelPath: '/models/car1.glb',
-    modelScale: 1.0,
-    topSpeed: 70,
-    acceleration: 57,
-    handling: 3.4,
-    braking: 3.4,
-    weight: 1.0,
-    description: 'Sueco leve e aerodinamico. O pico da engenharia automotiva.',
-    color: '#00ff88',
-    brand: 'Koenigsegg',
-    year: 2023
-  },
-
-  {
-    id: 'car_12_ssc',
-    name: 'SSC Tuatara',
-    tier: 4,
-    price: 1400,
-    modelPath: '/models/car2.glb',
-    modelScale: 1.0,
-    topSpeed: 72,
-    acceleration: 58,
-    handling: 3.2,
-    braking: 3.3,
-    weight: 1.0,
-    description: 'Record mundial de velocidade. Velocidade nao tem limite.',
-    color: '#6366f1',
-    brand: 'SSC',
-    year: 2023
-  },
-
-  // TIER 5 - Conceitos futuristas (Premium exclusivo)
-  {
-    id: 'car_13_tesla',
-    name: 'Tesla Model S Plaid',
-    tier: 5,
-    price: 1800,
-    modelPath: '/models/car3.glb',
-    modelScale: 1.0,
-    topSpeed: 65,
-    acceleration: 60,
-    handling: 3.6,
-    braking: 3.5,
-    weight: 0.95,
-    description: 'Veiculo eletrico futurista com aceleracao do futuro.',
-    color: '#06b6d4',
-    brand: 'Tesla',
-    year: 2023
-  },
-
-  {
-    id: 'car_14_rimac',
-    name: 'Rimac C_Two',
-    tier: 5,
-    price: 2000,
-    modelPath: '/models/car4.glb',
-    modelScale: 1.0,
-    topSpeed: 71,
-    acceleration: 62,
-    handling: 3.7,
-    braking: 3.6,
-    weight: 0.9,
-    description: 'Hipercarro croata eletrico. O futuro e AGORA.',
-    color: '#a78bfa',
-    brand: 'Rimac',
-    year: 2023
-  },
-
-  {
-    id: 'car_15_lotus',
-    name: 'Lotus Evija',
-    tier: 5,
-    price: 1900,
-    modelPath: '/models/car5.glb',
-    modelScale: 1.0,
-    topSpeed: 70,
-    acceleration: 61,
-    handling: 3.8,
-    braking: 3.7,
-    weight: 0.85,
-    description: 'Lendaria Lotus reimaginada para o futuro eletrico.',
-    color: '#f472b6',
-    brand: 'Lotus',
-    year: 2023
-  },
-
-  {
-    id: 'car_16_concept',
-    name: 'Concept Cyber X1',
-    tier: 5,
-    price: 2500,
-    modelPath: '/models/car6.glb',
-    modelScale: 1.0,
-    topSpeed: 75,
-    acceleration: 65,
-    handling: 4.0,
-    braking: 3.8,
-    weight: 0.8,
-    description: 'Conceito futurista puro. Velocidade transcendental.',
-    color: '#ec4899',
-    brand: 'Apex',
-    year: 2099
   }
 ];
 
 /**
- * Mapa de mapas disponíveis com configuracoes de iluminacao e ambiente
+ * Mapa de mapas disponíveis com configurações de iluminação e ambiente
  */
 export const MAPS_DATABASE = {
   city: {
     id: 'city',
-    name: 'Metropole Urbana',
+    name: 'Metrópole Urbana',
     skyColor: 0x87ceeb,
     groundColor: 0x666666,
     fogColor: 0x87ceeb,
@@ -316,7 +209,7 @@ export const MAPS_DATABASE = {
   },
   desert: {
     id: 'desert',
-    name: 'Canyon das Dunas',
+    name: 'Cânion das Dunas',
     skyColor: 0xffa500,
     groundColor: 0xdaa520,
     fogColor: 0xffa500,
@@ -338,7 +231,7 @@ export const MAPS_DATABASE = {
     ambientLightIntensity: 0.3,
     directionalLightIntensity: 0.5,
     theme: 'CYBER',
-    description: 'Circuito noturno com iluminacao neon futurista.'
+    description: 'Circuito noturno com iluminação neon futurista.'
   }
 };
 

@@ -155,19 +155,40 @@ class CarView {
 
   async load() {
     let model;
-    try { model = normalizeModel(await loadModel(this.data.modelPath), 4.4, this.data.modelScale || 1); tintModel(model, this.data.color); }
+    try {
+      model = normalizeModel(await loadModel(this.data.modelPath), 4.4, this.data.modelScale || 1);
+      // Correção de rotação para modelos que vieram virados de costas
+      if (this.data.modelRotationY) model.rotation.y += this.data.modelRotationY;
+      tintModel(model, this.data.color);
+    }
     catch { model = fallbackCar(this.data.color); }
     this.pivot.add(model);
-    const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2cc });
+
+    // Posiciona faróis/lanternas com base no tamanho real do carro (não em valores fixos)
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const halfL = Math.max(size.x, size.z) / 2;   // metade do comprimento (frente/trás)
+    const halfW = Math.min(size.x, size.z) / 2.5; // metade da largura (lados)
+    const h = 0.55 + size.y / 4;                  // altura dos faróis
+
+    // Faróis (esfera invisível, só a luz fraquinha brilha)
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.01 });
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff0000, emissiveIntensity: 0.8 });
-    for (const sx of [-0.75, 0.75]) {
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), lampMat); lamp.position.set(sx, 0.7, 2.15);
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.08), this.tailMat); tail.position.set(sx, 0.75, -2.18);
-      this.root.add(lamp, tail);
-      if (this.isMe) {   // faróis reais só no seu carro (barato no celular)
-        const spot = new THREE.SpotLight(0xfff2cc, 400, 60, Math.PI / 7, 0.5, 2); spot.position.set(sx, 0.7, 2.1);
-        const tg = new THREE.Object3D(); tg.position.set(sx, 0.2, 22); spot.target = tg; this.root.add(spot, tg);
-      }
+    for (const sx of [-halfW, halfW]) {
+      // Farol dianteiro (invisível, só brilha)
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), lampMat);
+      lamp.position.set(sx, h, halfL + 0.15);
+      this.root.add(lamp);
+      // Luz do farol (baixa intensidade, aparece pra todo mundo)
+      const spot = new THREE.SpotLight(0xfff2cc, 60, 30, Math.PI / 6, 0.5, 1);
+      spot.position.set(sx, h + 0.1, halfL + 0.25);
+      spot.target.position.set(sx, h, halfL + 12);
+      spot.castShadow = false;
+      this.root.add(spot, spot.target);
+      // Lanterna traseira
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.16, 0.06), this.tailMat);
+      tail.position.set(sx, h + 0.05, -(halfL + 0.15));
+      this.root.add(tail);
     }
     this.shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 12),
       new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25, depthWrite: false }));
@@ -242,6 +263,7 @@ function setTrack(id) {
 // ===== ESTADO =====
 const views = new Map();            // id → CarView
 let myId = null, room = null, lastState = null, selectedCar = 'car_01_civic';
+let garageView = null, garageOpen = false;
 let coins = 5000, unlocked = ['car_01_civic'];
 let myTel = null, sawCountdown = false;
 try {
@@ -328,10 +350,48 @@ function removeView(id) { const v = views.get(id); if (v) { v.destroy(); views.d
 
 function ensurePreview() {
   if (room || views.has('preview')) return;
+  if (garageOpen) { showGarageCar(selectedCar); return; }
   setTrack('SPEEDWAY');
   const p = getPointAtProgress(0.985, 0, TRACKS.SPEEDWAY);
   views.set('preview', new CarView(selectedCar, p.x, p.z, p.heading, true));
   setCamMode('orbit');
+}
+
+// ===== GARAGEM 3D =====
+function showGarageCar(carId) {
+  if (room) return;
+  hideGarageCar();
+  const data = getCarById(carId) || CARS_DATABASE[0];
+  const p = getPointAtProgress(0.5, 0, TRACKS.SPEEDWAY);
+  garageView = new CarView(carId, p.x, p.z, p.heading, false);
+  views.set('garage', garageView);
+  setTrack('SPEEDWAY');
+  setCamMode('orbit');
+  controls.autoRotate = true;
+  garageOpen = true;
+  updateGarageInfo(data);
+}
+
+function hideGarageCar() {
+  if (garageView) { garageView.destroy(); views.delete('garage'); garageView = null; }
+  garageOpen = false;
+}
+
+function updateGarageInfo(c) {
+  const el = $('garageInfo');
+  if (!el) return;
+  const owned = unlocked.includes(c.id);
+  el.innerHTML = `
+    <div style="margin:8px 0"><strong style="font-size:16px">${esc(c.name)}</strong></div>
+    <div style="color:#94a3b8;font-size:12px">${c.brand} · ${c.year}</div>
+    <div style="margin:4px 0;color:#00ff88">${esc(c.description)}</div>
+    <div style="margin-top:6px;font-size:12px;color:#94a3b8">
+      Vel ${c.topSpeed} · Acel ${c.acceleration} · Peso ${c.weight.toFixed(1)}
+    </div>
+    <div style="margin-top:8px">
+      ${owned ? '<span style="color:#00ff88">✓ Já comprado</span>' : `<span style="color:#f59e0b">🔒 ${c.price} 💰</span>`}
+    </div>
+  `;
 }
 
 // ===== TELEMETRIA =====
@@ -400,13 +460,19 @@ function renderCarList() {
         coins -= c.price; unlocked.push(c.id); updateWallet(); toast(`${c.name} comprado!`);
       }
       selectedCar = c.id; save(); renderCarList();
-      if (room) net.send({ type: 'set_car', carType: c.id });       // só vale no lobby da sala
+      if (garageOpen) { showGarageCar(selectedCar); }
+      else if (room) net.send({ type: 'set_car', carType: c.id });       // só vale no lobby da sala
       else { removeView('preview'); ensurePreview(); }
     };
     list.appendChild(b);
   });
 }
-$('garageBtn').onclick = () => $('garage').classList.toggle('open');
+$('garageBtn').onclick = () => {
+  const isOpen = $('garage').classList.toggle('open');
+  garageOpen = isOpen;
+  if (isOpen) { showGarageCar(selectedCar); }
+  else { hideGarageCar(); ensurePreview(); }
+};
 
 // ===== MENU / SALA =====
 function renderRoomList(rooms) {
@@ -484,7 +550,7 @@ function sendInput(dt) {
 // ===== CÂMERA =====
 let camMode = 'orbit';
 function setCamMode(m) { camMode = m; controls.enabled = m === 'orbit'; controls.autoRotate = m === 'orbit' && (!room || room.state === 'LOBBY'); }
-function myView() { return views.get(myId) || views.get('preview'); }
+function myView() { return views.get(myId) || (garageOpen ? views.get('garage') : null) || views.get('preview'); }
 
 function updateCamera(dt) {
   const v = myView();
