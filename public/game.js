@@ -1,14 +1,62 @@
 // public/game.js
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { TRACKS, CAR_TYPES as RAW_CAR_TYPES, getPointAtProgress } from '/shared/track.js';
+import { TRACKS, getPointAtProgress } from '/shared/track.js';
 
-// Mapeamento dos 4 carros .GLB com os preços solicitados
+// Mapeamento dos 4 carros .GLB com preços e escala ajustada
 const CAR_TYPES = [
-  { id: 'CAR1', name: 'Carro 1 (Inicial)', modelFile: '/models/car1.glb', price: 0, tier: 1, topSpeed: 45, accel: 35, handling: 2.5, desc: 'Carro leve inicial para começar as corridas.', color: '#3b82f6', accent: '#60a5fa' },
-  { id: 'CAR2', name: 'Carro 2 (Tuner GT)', modelFile: '/models/car2.glb', price: 200, tier: 2, topSpeed: 50, accel: 40, handling: 2.7, desc: 'Modelo esportivo com maior aceleração.', color: '#ef4444', accent: '#f87171' },
-  { id: 'CAR3', name: 'Carro 3 (Muscle V8)', modelFile: '/models/car3.glb', price: 700, tier: 3, topSpeed: 55, accel: 45, handling: 2.9, desc: 'Super potente em retas.', color: '#f59e0b', accent: '#fbbf24' },
-  { id: 'CAR4', name: 'Carro 4 (Cyber Hyper)', modelFile: '/models/car4.glb', price: 1500, tier: 4, topSpeed: 60, accel: 50, handling: 3.2, desc: 'O carro definitivo do circuito.', color: '#10b981', accent: '#34d399' }
+  { 
+    id: 'CAR1', 
+    name: 'Carro 1 (Inicial)', 
+    modelFile: '/models/car1.glb', 
+    price: 0, 
+    tier: 1, 
+    topSpeed: 45, 
+    accel: 35, 
+    handling: 2.5, 
+    desc: 'Carro leve inicial para começar as corridas.', 
+    color: '#3b82f6', 
+    scale: 0.8 // Ajuste este valor se o car1 ficar grande ou pequeno demais
+  },
+  { 
+    id: 'CAR2', 
+    name: 'Carro 2 (Tuner GT)', 
+    modelFile: '/models/car2.glb', 
+    price: 200, 
+    tier: 2, 
+    topSpeed: 50, 
+    accel: 40, 
+    handling: 2.7, 
+    desc: 'Modelo esportivo com maior aceleração.', 
+    color: '#ef4444', 
+    scale: 0.85 
+  },
+  { 
+    id: 'CAR3', 
+    name: 'Carro 3 (Muscle V8)', 
+    modelFile: '/models/car3.glb', 
+    price: 700, 
+    tier: 3, 
+    topSpeed: 55, 
+    accel: 45, 
+    handling: 2.9, 
+    desc: 'Super potente em retas.', 
+    color: '#f59e0b', 
+    scale: 0.8 
+  },
+  { 
+    id: 'CAR4', 
+    name: 'Carro 4 (Cyber Hyper)', 
+    modelFile: '/models/car4.glb', 
+    price: 1500, 
+    tier: 4, 
+    topSpeed: 60, 
+    accel: 50, 
+    handling: 3.2, 
+    desc: 'O carro definitivo do circuito.', 
+    color: '#10b981', 
+    scale: 0.75 
+  }
 ];
 
 const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -22,12 +70,11 @@ let currentRoom = null;
 let currentTrackConfig = TRACKS.SPEEDWAY;
 let lowGraphics = localStorage.getItem('apex_low_gfx') === '1';
 
-// CARTEIRA E GARAGEM (SALVO NO BROWSER)
+// CARTEIRA E GARAGEM
 let walletCoins = Number(localStorage.getItem('apex_wallet_coins') || 0);
 let unlockedCars = JSON.parse(localStorage.getItem('apex_unlocked_cars') || '["CAR1"]');
 let selectedCarId = localStorage.getItem('apex_selected_car') || 'CAR1';
 
-// Mapeamento de retrocompatibilidade para contas antigas
 if (selectedCarId === 'STARTER') selectedCarId = 'CAR1';
 if (!unlockedCars.includes('CAR1')) unlockedCars.push('CAR1');
 
@@ -84,11 +131,13 @@ function showToast(msg, color = '#ef4444') {
 }
 
 // ==========================================
-// THREE.JS ENGINE
+// THREE.JS ENGINE & ILUMINAÇÃO
 // ==========================================
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowGraphics, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b172a);
@@ -97,12 +146,30 @@ scene.fog = new THREE.FogExp2(0x0b172a, 0.0028);
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 550);
 camera.position.set(0, 25, -40);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
 scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
+const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.8);
 dirLight.position.set(80, 140, 60);
 scene.add(dirLight);
+
+// Geração de Mapa de Reflexos (Environment Map) para brilho metálico na lataria
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+
+function generateEnvMap() {
+  const envScene = new THREE.Scene();
+  envScene.background = new THREE.Color(0x1e293b);
+  const light1 = new THREE.DirectionalLight(0x38bdf8, 3);
+  light1.position.set(1, 2, 1);
+  const light2 = new THREE.DirectionalLight(0xf59e0b, 2);
+  light2.position.set(-1, -1, -1);
+  envScene.add(light1, light2);
+
+  const renderTarget = pmremGenerator.fromScene(envScene);
+  scene.environment = renderTarget.texture;
+}
+generateEnvMap();
 
 function applyGraphicsMode() {
   renderer.setPixelRatio(lowGraphics ? 1 : Math.min(window.devicePixelRatio, 2));
@@ -124,14 +191,49 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Instância do GLTFLoader para carregar /models/car1.glb a car4.glb
+// ==========================================
+// CARREGAMENTO DE MODELOS E EFETOS DE NITRO
+// ==========================================
 const gltfLoader = new GLTFLoader();
 
+// Função para criar o efeito de chamas duplas do Nitro
+function createNitroFlameEffect() {
+  const nitroGroup = new THREE.Group();
+
+  const flameMatCore = new THREE.MeshBasicMaterial({ color: 0x38bdf8 }); // Azul neon interno
+  const flameMatOuter = new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.85 }); // Laranja externo
+
+  const positions = [-0.45, 0.45]; // Escapamento esquerdo e direito
+
+  positions.forEach(x => {
+    const singleExhaust = new THREE.Group();
+
+    const core = new THREE.Mesh(new THREE.ConeGeometry(0.12, 1.2, 8), flameMatCore);
+    core.rotation.x = -Math.PI / 2;
+    core.position.z = -0.6;
+
+    const outer = new THREE.Mesh(new THREE.ConeGeometry(0.25, 1.8, 8), flameMatOuter);
+    outer.rotation.x = -Math.PI / 2;
+    outer.position.z = -0.9;
+
+    singleExhaust.add(core, outer);
+    singleExhaust.position.set(x, 0.4, -2.1);
+    nitroGroup.add(singleExhaust);
+  });
+
+  // Luz do Nitro
+  const nitroLight = new THREE.PointLight(0x38bdf8, 4, 8);
+  nitroLight.position.set(0, 0.5, -2.2);
+  nitroGroup.add(nitroLight);
+
+  return nitroGroup;
+}
+
 export function createDetailedCarMesh(carTypeId = 'CAR1', customColor = null) {
-  const spec = CAR_TYPES.find(c => c.id === carTypeId || c.modelFile?.includes(carTypeId.toLowerCase())) || CAR_TYPES[0];
+  const spec = CAR_TYPES.find(c => c.id === carTypeId) || CAR_TYPES[0];
   const root = new THREE.Group();
 
-  // Esfera de Escudo
+  // Escudo
   const shieldGeo = new THREE.SphereGeometry(2.6, 18, 18);
   const shieldMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.55 });
   const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
@@ -139,33 +241,38 @@ export function createDetailedCarMesh(carTypeId = 'CAR1', customColor = null) {
   shieldMesh.visible = false;
   root.add(shieldMesh);
 
-  // Chamas do Turbo
-  const flameGeo = new THREE.ConeGeometry(0.35, 1.5, 8);
-  const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
-  const flameMesh = new THREE.Mesh(flameGeo, flameMat);
-  flameMesh.rotation.x = -Math.PI / 2;
-  flameMesh.position.set(0, 0.5, -2.6);
+  // Efeito de Nitro Bonito
+  const flameMesh = createNitroFlameEffect();
   flameMesh.visible = false;
   root.add(flameMesh);
 
   root.userData = { shieldMesh, flameMesh, carTypeId: spec.id };
 
-  // Carrega o modelo .GLB da pasta /models/
+  // Carregador GLB com escala ajustada por veículo
   gltfLoader.load(
     spec.modelFile,
     (gltf) => {
       const model = gltf.scene;
+
+      // Aplica a escala definida individualmente no objeto CAR_TYPES
+      const carScale = spec.scale || 0.8;
+      model.scale.set(carScale, carScale, carScale);
+
       model.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
+          if (child.material) {
+            child.material.envMapIntensity = 1.2;
+          }
         }
       });
+
       root.add(model);
     },
     undefined,
     () => {
-      // Fallback simples com caixa de cor caso o .glb não seja encontrado
+      // Fallback
       const fallback = new THREE.Mesh(
         new THREE.BoxGeometry(2, 0.8, 4),
         new THREE.MeshStandardMaterial({ color: spec.color || 0x3b82f6 })
@@ -197,7 +304,7 @@ ringMesh.rotation.x = Math.PI / 2;
 ringMesh.position.y = 0.22;
 garageGroup.add(ringMesh);
 
-const garageLight = new THREE.PointLight(0xffffff, 2.5, 25);
+const garageLight = new THREE.PointLight(0xffffff, 3.0, 25);
 garageLight.position.set(0, 6, 4);
 garageGroup.add(garageLight);
 
