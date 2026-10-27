@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { TRACKS, getPointAtProgress } from '/shared/track.js';
 import { CARS_DATABASE, getCarById } from '/shared/carData.js';
 import { buildWorld, THEMES } from './maps.js';
@@ -17,13 +20,30 @@ if (mobile) document.body.classList.add('touch');
 // ===== RENDERER =====
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 3000);
-const renderer = new THREE.WebGLRenderer({ canvas: $('canvas'), antialias: !mobile, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas: $('canvas'), antialias: !mobile, powerPreference: 'high-performance', physicallyCorrectLights: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 camera.position.set(8, 5, 12);
+
+// Pós-processamento (bloom) para qualidade extrema, com fallback seguro
+let composer = null;
+try {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.4, 0.85);
+  bloom.threshold = 0.12;
+  bloom.strength = 1.15;
+  bloom.radius = 0.7;
+  composer.addPass(bloom);
+} catch (e) {
+  console.warn('Post-processamento indisponível, render direto:', e);
+}
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.autoRotate = true; controls.maxPolarAngle = Math.PI / 2.05;
 const vfx = new VFX(scene);
@@ -39,13 +59,33 @@ export function loadModel(url) {
   return modelCache.get(url).then((s) => s.clone(true));
 }
 
-function normalizeModel(obj, targetLen = 4.4) {
-  const box = new THREE.Box3().setFromObject(obj), size = box.getSize(new THREE.Vector3());
-  if (size.x > size.z) { obj.rotation.y = Math.PI / 2; box.setFromObject(obj); box.getSize(size); }
-  obj.scale.multiplyScalar(targetLen / (Math.max(size.x, size.z) || 1));
+function normalizeModel(obj, targetLen = 4.4, extraScale = 1) {
+  obj.rotation.set(0, 0, 0);
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  let size = box.getSize(new THREE.Vector3());
+  const sx = size.x, sy = size.y, sz = size.z;
+
+  // Coloca o maior eixo do modelo em Z (frente do carro), para todos ficarem proporcionais.
+  if (sy > sx * 1.25 && sy > sz * 1.25) {
+    obj.rotation.x = -Math.PI / 2;          // Y (altura) vira Z (frente)
+    obj.updateMatrixWorld(true);
+    box.setFromObject(obj);
+    size = box.getSize(new THREE.Vector3());
+  } else if (sx > sz) {
+    obj.rotation.y = Math.PI / 2;           // X (largura) vira Z (frente)
+    obj.updateMatrixWorld(true);
+    box.setFromObject(obj);
+    size = box.getSize(new THREE.Vector3());
+  }
+
+  const len = Math.max(size.x, size.z) || 1;
+  obj.scale.setScalar((targetLen / len) * extraScale);
+
   box.setFromObject(obj);
   const c = box.getCenter(new THREE.Vector3());
   obj.position.set(obj.position.x - c.x, obj.position.y - box.min.y, obj.position.z - c.z);
+
   const g = new THREE.Group(); g.add(obj); return g;
 }
 
@@ -59,7 +99,12 @@ function tintModel(model, color) {
     meshes.push(c);
   });
   let matched = false;
-  const paint = (m) => { m.color.set(color); if (m.map) m.color.lerp(new THREE.Color(0xffffff), 0.45); };
+  const paint = (m) => {
+    m.color.set(color);
+    if (m.map) m.color.lerp(new THREE.Color(0xffffff), 0.45);
+    if (m.clearcoat !== undefined) { m.metalness = 0.92; m.roughness = 0.22; m.clearcoat = 1.0; m.clearcoatRoughness = 0.12; }
+    else { m.metalness = 0.7; m.roughness = 0.3; }
+  };
   meshes.forEach((c) => [].concat(c.material).forEach((m) => { if (/body|paint|carpaint|main/i.test(m.name)) { paint(m); matched = true; } }));
   if (matched) return;
   let best = null, bv = 0;
@@ -110,7 +155,7 @@ class CarView {
 
   async load() {
     let model;
-    try { model = normalizeModel(await loadModel(this.data.modelPath)); tintModel(model, this.data.color); }
+    try { model = normalizeModel(await loadModel(this.data.modelPath), 4.4, this.data.modelScale || 1); tintModel(model, this.data.color); }
     catch { model = fallbackCar(this.data.color); }
     this.pivot.add(model);
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2cc });
@@ -160,14 +205,18 @@ class CarView {
 }
 
 // ===== ILUMINAÇÃO / MUNDO =====
-const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x333344, 0.75);
+const sun = new THREE.DirectionalLight(0xffffff, 2.9);
+sun.position.set(60, 85, 45);
 sun.castShadow = true;
-sun.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048);
-Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 400 });
-sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
-const glowA = new THREE.PointLight(0xffffff, 900, 140, 2), glowB = new THREE.PointLight(0xffffff, 900, 140, 2);
-scene.add(hemi, sun, sun.target, glowA, glowB);
+sun.shadow.mapSize.set(mobile ? 2048 : 4096, mobile ? 2048 : 4096);
+Object.assign(sun.shadow.camera, { left: -95, right: 95, top: 95, bottom: -95, near: 0.5, far: 520 });
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+sun.shadow.focus = true;
+const fill = new THREE.DirectionalLight(0xffffff, 0.55);
+fill.position.set(-45, 30, -35);
+const glowA = new THREE.PointLight(0xffffff, 1300, 170, 2), glowB = new THREE.PointLight(0xffffff, 1300, 170, 2);
+scene.add(hemi, sun, sun.target, fill, glowA, glowB);
 
 let world = null, trackId = null, themeCfg = THEMES.FOREST, sunAngle = 0.8;
 
