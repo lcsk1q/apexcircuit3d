@@ -46,13 +46,15 @@ function generateRoomCode() {
 }
 
 class Room {
-  constructor({ name, maxPlayers = 6, isPrivate = false, allowMidRaceJoin = false, trackId = 'SPEEDWAY', hostToken }) {
+  constructor({ name, maxPlayers = 6, isPrivate = false, password = null, allowMidRaceJoin = false, trackId = 'SPEEDWAY', totalLaps = 3, hostToken }) {
     this.id = generateRoomCode();
     this.name = (name || `Sala #${this.id}`).slice(0, 28);
     this.maxPlayers = Math.min(Math.max(Number(maxPlayers) || 6, 2), 8);
     this.isPrivate = Boolean(isPrivate);
+    this.password = password ? String(password).slice(0, 16) : null;
     this.allowMidRaceJoin = Boolean(allowMidRaceJoin);
     this.trackConfig = TRACKS[trackId] || TRACKS.SPEEDWAY;
+    this.totalLaps = Math.min(Math.max(Number(totalLaps) || 3, 1), 10);
     this.hostToken = hostToken;
     this.state = 'LOBBY';
     this.players = new Map();
@@ -486,7 +488,7 @@ class Room {
         if (p.lastProgress > 0.75 && prog < 0.25 && p.highestCheckpoint >= 2) {
           p.lap += 1;
           p.highestCheckpoint = 0;
-          if (p.lap > this.trackConfig.totalLaps) {
+          if (p.lap > this.totalLaps) {
             p.lap = this.trackConfig.totalLaps;
             p.finished = true;
             p.finishTimeMs = now - this.raceStartTime;
@@ -540,7 +542,7 @@ class Room {
         state: this.state,
         hostId: hostPlayer ? hostPlayer.id : null,
         countdownMs: this.state === 'COUNTDOWN' ? Math.max(0, this.countdownEnd - Date.now()) : 0,
-        totalLaps: this.trackConfig.totalLaps,
+        totalLaps: this.totalLaps,
         players: Array.from(this.players.values()).map(p => ({
           id: p.id,
           name: p.name,
@@ -728,7 +730,11 @@ wss.on('connection', (ws) => {
           name: msg.roomName,
           maxPlayers: msg.maxPlayers,
           trackId: msg.trackId || 'SPEEDWAY',
-          hostToken: currentSession.token
+          hostToken: currentSession.token,
+          isPrivate: Boolean(msg.isPrivate),
+          password: msg.password || null,
+          allowMidRaceJoin: Boolean(msg.allowMidRaceJoin),
+          totalLaps: Number(msg.totalLaps) || 3
         });
         rooms.set(room.id, room);
         const res = room.addPlayer(currentSession, msg.carType);
@@ -779,6 +785,9 @@ wss.on('connection', (ws) => {
         const code = String(msg.roomId || '').trim().toUpperCase();
         const room = rooms.get(code);
         if (!room) return ws.send(JSON.stringify({ type: 'error', message: 'Sala não encontrada.' }));
+        if (room.isPrivate && String(msg.password || '') !== room.password) {
+          return ws.send(JSON.stringify({ type: 'error', message: 'Senha incorreta para esta sala privada.' }));
+        }
         handleLeaveCurrentRoom(currentSession);
         const res = room.addPlayer(currentSession, msg.carType);
         if (!res.ok) return ws.send(JSON.stringify({ type: 'error', message: res.reason }));

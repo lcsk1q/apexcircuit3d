@@ -11,6 +11,8 @@
   .panel { position:absolute; display:none; background:rgba(14,18,38,.94); border:2px solid #00ff88; border-radius:8px; padding:14px; z-index:100; box-shadow:0 0 20px rgba(0,255,136,.25); max-height:calc(100% - 24px); overflow-y:auto; }
   h2 { color:#00ff88; font-size:15px; margin-bottom:8px; }
   input, select { width:100%; padding:9px; margin:4px 0; background:#0b0f1e; border:1px solid #00ff88; color:#e5e7eb; border-radius:4px; font-size:14px; }
+  label { color:#94a3b8; font-size:12px; cursor:pointer; }
+label input { margin:0; }
   button { padding:10px 12px; margin:4px 0; background:rgba(0,255,136,.12); border:1px solid #00ff88; color:#00ff88; border-radius:4px; cursor:pointer; font-size:13px; }
   button:hover { background:rgba(0,255,136,.3); } button:disabled { opacity:.4; cursor:default; }
   button.wide { width:100%; } button.primary { background:#00ff88; color:#04210f; font-weight:bold; }
@@ -69,12 +71,16 @@
   <input id="name" maxlength="16" placeholder="Seu nome de piloto">
   <button id="btnQuick" class="wide primary">⚡ Jogo rápido</button>
   <hr style="border-color:rgba(0,255,136,.2);margin:8px 0">
+  <h3 style="margin:6px 0 2px">🆕 Criar Servidor (Sala)</h3>
   <input id="roomName" maxlength="28" placeholder="Nome da sala">
   <div class="row"><select id="trackSel"></select><select id="maxSel"><option>2</option><option>4</option><option selected>6</option><option>8</option></select></div>
-  <button id="btnCreate" class="wide">➕ Criar sala</button>
+  <div class="row"><select id="lapsSel"><option value="3">3 voltas</option><option value="5">5 voltas</option><option value="7">7 voltas</option></select><label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin:auto 0"><input type="checkbox" id="privateToggle"> Privada</label></div>
+  <input id="roomPass" maxlength="12" placeholder="Senha (opcional)">
+  <button id="btnCreate" class="wide primary">➕ Criar Servidor</button>
+  <hr style="border-color:rgba(0,255,136,.2);margin:10px 0">
   <div class="row"><input id="codeIn" maxlength="5" placeholder="CÓDIGO" style="text-transform:uppercase"><button id="btnJoin">Entrar</button></div>
-  <h2 style="margin-top:8px">Salas abertas</h2>
-  <div id="roomList"><small>Nenhuma sala. Crie uma ou use o jogo rápido.</small></div>
+  <h2 style="margin-top:8px">Servidores abertos</h2>
+  <div id="roomList"><small>Nenhum servidor. Crie um ou use o jogo rápido.</small></div>
 </div>
 
 <div id="roomPanel" class="panel">

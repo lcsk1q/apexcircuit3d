@@ -316,7 +316,7 @@ function applyRoomState(r) {
 
   const cfg = TRACKS[r.trackId];
   $('roomTitle').textContent = r.name;
-  $('roomCode').textContent = r.id;
+  $('roomCode').textContent = r.id + (r.isPrivate ? '  🔒' : '');
   $('roomTrack').textContent = `${cfg.name} · ${r.totalLaps} voltas · ${r.players.length}/${r.maxPlayers} pilotos`;
   const me = r.players.find((p) => p.id === myId), host = r.hostId === myId;
   $('players').innerHTML = r.players.map((p) => `<div class="player"><span>${p.id === r.hostId ? '👑 ' : ''}${esc(p.name)}${p.connected ? '' : ' (offline)'}</span><span>${p.ready ? '✅' : '⏳'}</span></div>`).join('');
@@ -422,8 +422,21 @@ $('roomList').onclick = (e) => { const id = e.target.dataset?.join; if (id) net.
 $('trackSel').innerHTML = Object.values(TRACKS).map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
 $('name').addEventListener('change', () => { localStorage.setItem('apex_name', $('name').value.trim()); net.hello(); });
 $('btnQuick').onclick = () => net.send({ type: 'quick_play', carType: selectedCar });
-$('btnCreate').onclick = () => net.send({ type: 'create_room', roomName: $('roomName').value.trim(), maxPlayers: +$('maxSel').value, trackId: $('trackSel').value, carType: selectedCar });
-$('btnJoin').onclick = () => { const c = $('codeIn').value.trim().toUpperCase(); if (c) net.send({ type: 'join_room', roomId: c, carType: selectedCar }); };
+$('btnCreate').onclick = () => net.send({
+  type: 'create_room',
+  roomName: $('roomName').value.trim(),
+  maxPlayers: +$('maxSel').value,
+  trackId: $('trackSel').value,
+  totalLaps: +$('lapsSel').value,
+  isPrivate: $('privateToggle').checked,
+  password: $('roomPass').value.trim(),
+  allowMidRaceJoin: false,
+  carType: selectedCar
+});
+$('btnJoin').onclick = () => {
+  const c = $('codeIn').value.trim().toUpperCase();
+  if (c) net.send({ type: 'join_room', roomId: c, carType: selectedCar, password: $('roomPass').value.trim() });
+};
 $('btnReady').onclick = () => net.send({ type: 'toggle_ready' });
 $('btnStart').onclick = () => net.send({ type: 'start_race' });
 $('btnLeave').onclick = () => net.send({ type: 'leave_room' });
@@ -510,10 +523,16 @@ function frame() {
   vfx.setScale(renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)));
   vfx.update(dt);
   updateCamera(dt);
-  renderer.render(scene, camera);
+  if (composer) composer.render(dt);
+  else renderer.render(scene, camera);
 }
 
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
+});
 
 // ===== INIT =====
 $('name').value = localStorage.getItem('apex_name') || '';
