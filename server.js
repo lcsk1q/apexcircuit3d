@@ -430,15 +430,28 @@ class Room {
 
       if (Math.abs(metrics.distFromCenter) > maxOffset) {
         const sign = Math.sign(metrics.distFromCenter);
-        p.x = metrics.cx + metrics.nx * sign * maxOffset;
-        p.z = metrics.cz + metrics.nz * sign * maxOffset;
+        const nx = metrics.nx;
+        const nz = metrics.nz;
 
-        const vn = p.vx * metrics.nx + p.vz * metrics.nz;
+        // Reposiciona o carro na borda da pista (mantém dentro)
+        p.x = metrics.cx + nx * sign * maxOffset;
+        p.z = metrics.cz + nz * sign * maxOffset;
+
+        // Se o carro está entrando para fora, inibe apenas a componente normal
+        const vn = p.vx * nx + p.vz * nz;
         if (vn * sign > 0) {
-          p.vx -= 1.25 * vn * metrics.nx;
-          p.vz -= 1.25 * vn * metrics.nz;
+          const restitution = 0.25; // baixo quique na parede
+          p.vx -= (1 + restitution) * vn * nx;
+          p.vz -= (1 + restitution) * vn * nz;
         }
-        p.vx *= 0.9; p.vz *= 0.9;
+
+        // Deslizamento ao longo da parede: preserva quase toda a velocidade tangencial
+        // para o carro não parar completamente quando fica "grudado" na parede
+        const vt = p.vx * (-nz) + p.vz * nx; // componente tangencial
+        const vtMult = 0.985;               // pouco atrito ao longo da parede
+        const vnNow = p.vx * nx + p.vz * nz;
+        p.vx = vnNow * nx + vt * vtMult * (-nz);
+        p.vz = vnNow * nz + vt * vtMult * nx;
       }
 
       p.speed = Math.hypot(p.vx, p.vz) * (forwardSpeed >= 0 ? 1 : -1);
