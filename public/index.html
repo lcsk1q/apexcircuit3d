@@ -1,148 +1,112 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Apex Circuit 3D - Racing Game</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Apex Circuit 3D - Corrida Online</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0b0f1e; color:#e5e7eb; font-family:'Segoe UI',Tahoma,sans-serif; overscroll-behavior:none; }
+  #canvas { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .panel { position:absolute; display:none; background:rgba(14,18,38,.94); border:2px solid #00ff88; border-radius:8px; padding:14px; z-index:100; box-shadow:0 0 20px rgba(0,255,136,.25); max-height:calc(100% - 24px); overflow-y:auto; }
+  h2 { color:#00ff88; font-size:15px; margin-bottom:8px; }
+  input, select { width:100%; padding:9px; margin:4px 0; background:#0b0f1e; border:1px solid #00ff88; color:#e5e7eb; border-radius:4px; font-size:14px; }
+  button { padding:10px 12px; margin:4px 0; background:rgba(0,255,136,.12); border:1px solid #00ff88; color:#00ff88; border-radius:4px; cursor:pointer; font-size:13px; }
+  button:hover { background:rgba(0,255,136,.3); } button:disabled { opacity:.4; cursor:default; }
+  button.wide { width:100%; } button.primary { background:#00ff88; color:#04210f; font-weight:bold; }
+  .row { display:flex; gap:6px; } .row > * { flex:1; }
+  small, .muted { color:#94a3b8; font-size:12px; }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
-            overflow: hidden;
-        }
+  /* Visibilidade por tela (body[data-view]) */
+  body[data-view=menu] #menu, body[data-view=room] #roomPanel { display:block; }
+  #menu, #roomPanel { top:12px; left:12px; width:min(340px, calc(100% - 24px)); }
+  #hud, #touch, #countdown, #hPower, #hSpeed { display:none; }
+  body[data-view=race] #hud, body[data-view=race] #countdown, body[data-view=race] #hPower, body[data-view=race] #hSpeed { display:block; }
+  body[data-view=race].touch #touch { display:block; }
 
-        #canvas { display: block; width: 100%; height: 100vh; }
+  #roomList { margin-top:6px; } .room { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-top:1px solid rgba(0,255,136,.2); font-size:12px; }
+  .room button { margin:0; padding:6px 10px; }
+  .player { display:flex; justify-content:space-between; padding:5px 0; border-top:1px solid rgba(0,255,136,.15); font-size:13px; }
+  #roomCode { font-size:26px; letter-spacing:5px; color:#fbbf24; font-weight:bold; }
 
-        #hud {
-            position: absolute; top: 20px; left: 20px;
-            color: #00ff88; font-size: 14px; font-family: 'Courier New', monospace;
-            z-index: 100; text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-            pointer-events: none; line-height: 1.6;
-        }
+  #topbar { position:absolute; top:12px; right:12px; z-index:110; display:flex; gap:8px; align-items:center; }
+  #wallet { color:#f59e0b; font-weight:bold; text-shadow:0 0 8px rgba(245,158,11,.6); }
+  #garage { top:56px; right:12px; width:min(300px, calc(100% - 24px)); }
+  #garage.open { display:block; }
+  .car-button { display:block; width:100%; text-align:left; padding:7px 9px; margin:4px 0; font-size:12px; }
+  .car-button.selected { background:rgba(0,255,136,.4); font-weight:bold; } .car-button.locked { border-color:#f59e0b; color:#f59e0b; background:rgba(245,158,11,.08); }
 
-        #speedometer {
-            position: absolute; bottom: 30px; left: 30px;
-            color: #00ff88; font-size: 22px; font-weight: bold;
-            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-            z-index: 100; pointer-events: none;
-        }
+  #status { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); z-index:120; font-size:12px; padding:6px 12px; border-radius:20px; background:rgba(0,0,0,.7); color:#fbbf24; display:none; text-align:center; max-width:90%; }
+  #toast { position:absolute; top:60px; left:50%; transform:translateX(-50%); background:rgba(14,18,38,.95); border:1px solid #f59e0b; color:#f59e0b; padding:8px 16px; border-radius:6px; z-index:150; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  #loading { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(14,18,38,.97); padding:24px 32px; border-radius:10px; color:#00ff88; z-index:200; display:none; }
+  #loading.active { display:block; }
 
-        #carSelector {
-            position: absolute; top: 20px; right: 20px;
-            background: rgba(26, 26, 46, 0.95);
-            border: 2px solid #00ff88; padding: 15px; border-radius: 5px;
-            width: 290px; z-index: 100; max-height: 70vh; overflow-y: auto;
-            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-        }
+  #hud { position:absolute; top:12px; left:12px; z-index:100; font-family:'Courier New',monospace; color:#00ff88; text-shadow:0 0 8px rgba(0,255,136,.5); pointer-events:none; line-height:1.5; }
+  #hPos { font-size:34px; font-weight:bold; } #hSpeed { position:fixed; bottom:calc(16px + env(safe-area-inset-bottom)); left:16px; font-size:22px; font-weight:bold; }
+  #hPower { position:fixed; top:56px; left:50%; transform:translateX(-50%); font-size:16px; color:#fbbf24; }
+  #countdown { position:absolute; top:35%; left:50%; transform:translate(-50%,-50%); font-size:110px; font-weight:bold; color:#fbbf24; text-shadow:0 0 30px rgba(251,191,36,.8); z-index:100; pointer-events:none; }
 
-        .car-button {
-            display: block; width: 100%; padding: 8px 10px; margin: 5px 0;
-            background: rgba(0, 255, 136, 0.1); border: 1px solid #00ff88;
-            color: #00ff88; cursor: pointer; border-radius: 3px;
-            transition: all 0.2s; text-align: left; font-size: 12px;
-        }
+  #touch { position:absolute; inset:auto 0 0 0; height:46%; z-index:90; pointer-events:none; padding-bottom:env(safe-area-inset-bottom); }
+  #touch .btn { position:absolute; pointer-events:auto; touch-action:none; width:76px; height:76px; border-radius:50%; background:rgba(0,255,136,.18); border:2px solid #00ff88; color:#00ff88; font-size:26px; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; }
+  #touch .btn.on { background:rgba(0,255,136,.55); }
+  #bLeft { left:16px; bottom:70px; } #bRight { left:106px; bottom:70px; }
+  #bGas { right:16px; bottom:90px; width:92px !important; height:92px !important; } #bBrake { right:118px; bottom:60px; }
+  #bPower { right:20px; bottom:200px; border-color:#fbbf24 !important; color:#fbbf24 !important; background:rgba(251,191,36,.18) !important; }
 
-        .car-button:hover { background: rgba(0, 255, 136, 0.3); }
-        .car-button.selected {
-            background: rgba(0, 255, 136, 0.4); font-weight: bold;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.8);
-        }
-        .car-button.locked { border-color: #f59e0b; color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
-
-        #wallet {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            color: #f59e0b; font-size: 16px; font-weight: bold;
-            z-index: 100; text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
-            pointer-events: none;
-        }
-
-        #mapSelector {
-            position: absolute; bottom: 30px; right: 30px;
-            background: rgba(26, 26, 46, 0.95);
-            border: 2px solid #00ff88; padding: 15px; border-radius: 5px;
-            z-index: 100; box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-        }
-
-        .map-button {
-            display: inline-block; padding: 8px 15px; margin: 5px;
-            background: rgba(0, 255, 136, 0.1); border: 1px solid #00ff88;
-            color: #00ff88; cursor: pointer; border-radius: 3px;
-            transition: all 0.2s; font-size: 12px;
-        }
-        .map-button:hover { background: rgba(0, 255, 136, 0.3); }
-        .map-button.active {
-            background: rgba(0, 255, 136, 0.4); font-weight: bold;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.8);
-        }
-
-        #loading {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(26, 26, 46, 0.98); padding: 30px 40px; border-radius: 10px;
-            color: #00ff88; text-align: center; z-index: 200; display: none;
-            box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
-        }
-        #loading.active { display: block; }
-
-        .loading-spinner {
-            border: 3px solid rgba(0, 255, 136, 0.3); border-top: 3px solid #00ff88;
-            border-radius: 50%; width: 40px; height: 40px;
-            animation: spin 1s linear infinite; margin: 15px auto;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        #help { position: absolute; bottom: 100px; left: 30px; color: #94a3b8; font-size: 12px; z-index: 100; pointer-events: none; }
-    
-        #nitroBar { position:absolute; bottom:70px; left:30px; width:220px; height:10px; border:1px solid #f97316; border-radius:5px; z-index:100; overflow:hidden; pointer-events:none; }
-        #nitroFill { height:100%; width:100%; background:linear-gradient(90deg,#f97316,#fde047); transition:width .1s; }
-        #toast { position:absolute; top:70px; left:50%; transform:translateX(-50%); background:rgba(26,26,46,.95); border:1px solid #f59e0b; color:#f59e0b; padding:8px 16px; border-radius:5px; z-index:150; opacity:0; transition:opacity .3s; pointer-events:none; }
-        #toast.show { opacity:1; }
+  #results { top:50%; left:50%; transform:translate(-50%,-50%); width:min(360px, calc(100% - 24px)); z-index:160; }
+  #results.open { display:block; }
 </style>
 </head>
-<body>
-    <canvas id="canvas"></canvas>
+<body data-view="menu">
+<canvas id="canvas"></canvas>
 
-    <div id="loading">
-        <div class="loading-spinner"></div>
-        <p id="loadingText">Carregando...</p>
-    </div>
+<div id="topbar">💰 <span id="wallet"><span id="walletCoins">0</span></span><button id="garageBtn">🚗 Garagem</button></div>
+<div id="garage" class="panel"><h2>🚗 GARAGEM</h2><div id="carList"></div></div>
 
-    <div id="hud">
-        <div>Mapa: <span id="currentMap">...</span></div>
-        <div>Carro: <span id="currentCar">...</span></div>
-        <div>FPS: <span id="fps">0</span></div>
-    </div>
+<div id="menu" class="panel">
+  <h2>🏁 APEX CIRCUIT</h2>
+  <input id="name" maxlength="16" placeholder="Seu nome de piloto">
+  <button id="btnQuick" class="wide primary">⚡ Jogo rápido</button>
+  <hr style="border-color:rgba(0,255,136,.2);margin:8px 0">
+  <input id="roomName" maxlength="28" placeholder="Nome da sala">
+  <div class="row"><select id="trackSel"></select><select id="maxSel"><option>2</option><option>4</option><option selected>6</option><option>8</option></select></div>
+  <button id="btnCreate" class="wide">➕ Criar sala</button>
+  <div class="row"><input id="codeIn" maxlength="5" placeholder="CÓDIGO" style="text-transform:uppercase"><button id="btnJoin">Entrar</button></div>
+  <h2 style="margin-top:8px">Salas abertas</h2>
+  <div id="roomList"><small>Nenhuma sala. Crie uma ou use o jogo rápido.</small></div>
+</div>
 
-    <div id="wallet">💰 <span id="walletCoins">0</span></div>
-    <div id="speedometer">Velocidade: <span id="speedValue">0</span> km/h</div>
-    <div id="nitroBar"><div id="nitroFill"></div></div>
-    <div id="toast"></div>
-    <div id="help">WASD/Setas = dirigir &nbsp;|&nbsp; Shift = nitro &nbsp;|&nbsp; Espaço = freio de mão (drift) &nbsp;|&nbsp; C = câmera</div>
+<div id="roomPanel" class="panel">
+  <h2 id="roomTitle">Sala</h2>
+  <div id="roomCode">-----</div><small id="roomTrack"></small>
+  <div id="players" style="margin:8px 0"></div>
+  <div class="row"><button id="btnReady" class="primary">Pronto</button><button id="btnStart">Iniciar</button></div>
+  <div class="row"><button id="btnShare">📨 Convidar</button><button id="btnLeave">Sair</button></div>
+</div>
 
-    <div id="carSelector">
-        <strong style="display:block;margin-bottom:10px;color:#00ff88;">🚗 GARAGEM</strong>
-        <div id="carList"></div>
-    </div>
+<div id="hud">
+  <div id="hPos">1º</div><div id="hLap">Volta 1/3</div><div id="hCoins">🪙 0</div>
+</div>
+<div id="hPower"></div><div id="hSpeed">0 km/h</div>
+<div id="countdown"></div>
 
-    <div id="mapSelector">
-        <strong style="display:block;margin-bottom:10px;color:#00ff88;">🗺️ MAPAS</strong>
-        <button class="map-button active" data-map="city">Cidade</button>
-        <button class="map-button" data-map="desert">Deserto</button>
-        <button class="map-button" data-map="night">Pista Noturna</button>
-    </div>
+<div id="touch">
+  <div class="btn" id="bLeft" data-k="left">◀</div><div class="btn" id="bRight" data-k="right">▶</div>
+  <div class="btn" id="bBrake" data-k="down">■</div><div class="btn" id="bGas" data-k="up">▲</div>
+  <div class="btn" id="bPower" data-k="power">⚡</div>
+</div>
 
-    <!-- Import Maps: Three.js r167 (versao moderna com WebGL2/sRGB correto) -->
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/"
-        }
-    }
-    </script>
+<div id="results" class="panel"><h2>🏆 RESULTADO</h2><div id="resList"></div><button id="btnResClose" class="wide primary">Continuar</button></div>
+<div id="status"></div><div id="toast"></div>
+<div id="loading"><p id="loadingText">Carregando...</p></div>
 
-    <script type="module" src="./game.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/"
+} }
+</script>
+<script type="module" src="./game.js"></script>
 </body>
 </html>

@@ -4,7 +4,19 @@ import http from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TRACKS, CAR_TYPES, getTrackMetrics, getPointAtProgress } from './shared/track.js';
+import { TRACKS, getTrackMetrics, getPointAtProgress } from './shared/track.js';
+import { CARS_DATABASE } from './shared/carData.js';
+
+// Catálogo único (shared/carData.js). Os atributos são reescalados para a faixa que a física
+// do servidor foi balanceada (topSpeed 46-59, accel 32-50, handling 2.4-3.15) para as pistas
+// atuais continuarem jogáveis. Ajuste os fatores se quiser carros mais rápidos.
+const lerp = (v, a0, a1, b0, b1) => b0 + ((v - a0) / (a1 - a0)) * (b1 - b0);
+const CAR_TYPES = CARS_DATABASE.map(c => ({
+  id: c.id, name: c.name, tier: c.tier, price: c.price, color: c.color,
+  topSpeed: lerp(c.topSpeed, 45, 75, 46, 59),
+  accel: lerp(c.acceleration, 32, 65, 32, 50),
+  handling: lerp(c.handling, 2.4, 4.0, 2.4, 3.15)
+}));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
