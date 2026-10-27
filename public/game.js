@@ -16,7 +16,7 @@ const CAR_TYPES = [
     handling: 2.5, 
     desc: 'Carro leve inicial para começar as corridas.', 
     color: '#3b82f6', 
-    scale: 0.8 // Ajuste este valor se o car1 ficar grande ou pequeno demais
+    scale: 1.5 // Ajuste este valor se o car1 ficar grande ou pequeno demais
   },
   { 
     id: 'CAR2', 
@@ -29,7 +29,7 @@ const CAR_TYPES = [
     handling: 2.7, 
     desc: 'Modelo esportivo com maior aceleração.', 
     color: '#ef4444', 
-    scale: 0.85 
+    scale: 0.9
   },
   { 
     id: 'CAR3', 
@@ -42,7 +42,7 @@ const CAR_TYPES = [
     handling: 2.9, 
     desc: 'Super potente em retas.', 
     color: '#f59e0b', 
-    scale: 0.8 
+    scale: 1.5
   },
   { 
     id: 'CAR4', 
@@ -55,7 +55,7 @@ const CAR_TYPES = [
     handling: 3.2, 
     desc: 'O carro definitivo do circuito.', 
     color: '#10b981', 
-    scale: 8
+    scale: 4
   }
 ];
 
